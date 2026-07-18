@@ -17,6 +17,7 @@ pub struct User {
     pub public_key: Option<String>, pub avatar_path: Option<String>,
     pub bio: Option<String>, pub designation: Option<String>,
     pub last_seen: Option<String>, pub is_online: bool, pub created_at: String,
+    pub dingo_id: Option<String>, pub last_id_change: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -116,6 +117,9 @@ impl Database {
             )", [])?;
         let _ = conn.execute("ALTER TABLE users ADD COLUMN bio TEXT DEFAULT ''", []);
         let _ = conn.execute("ALTER TABLE users ADD COLUMN designation TEXT DEFAULT ''", []);
+        let _ = conn.execute("ALTER TABLE users ADD COLUMN dingo_id TEXT", []);
+        let _ = conn.execute("ALTER TABLE users ADD COLUMN last_id_change TEXT", []);
+        let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_dingo_id ON users(dingo_id)", []);
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS messages (
@@ -190,10 +194,11 @@ impl Database {
     pub fn create_user(&self, user: &User) -> SqliteResult<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR REPLACE INTO users (id,username,device_id,public_key,avatar_path,bio,designation,last_seen,is_online,created_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+            "INSERT OR REPLACE INTO users (id,username,device_id,public_key,avatar_path,bio,designation,last_seen,is_online,created_at,dingo_id,last_id_change)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
             params![user.id, user.username, user.device_id, user.public_key, user.avatar_path,
-                    user.bio, user.designation, user.last_seen, user.is_online as i32, user.created_at],
+                    user.bio, user.designation, user.last_seen, user.is_online as i32, user.created_at,
+                    user.dingo_id, user.last_id_change],
         )?;
         Ok(())
     }
@@ -204,11 +209,12 @@ impl Database {
             public_key: row.get(3)?, avatar_path: row.get(4)?,
             bio: row.get(5)?, designation: row.get(6)?,
             last_seen: row.get(7)?, is_online: row.get::<_, i32>(8)? != 0, created_at: row.get(9)?,
+            dingo_id: row.get(10)?, last_id_change: row.get(11)?,
         })
     }
 
     const USER_COLS: &'static str =
-        "id,username,device_id,public_key,avatar_path,COALESCE(bio,'') as bio,COALESCE(designation,'') as designation,last_seen,is_online,created_at";
+        "id,username,device_id,public_key,avatar_path,COALESCE(bio,'') as bio,COALESCE(designation,'') as designation,last_seen,is_online,created_at,COALESCE(dingo_id,'') as dingo_id,COALESCE(last_id_change,'') as last_id_change";
 
     pub fn get_user(&self, id: &str) -> SqliteResult<Option<User>> {
         let conn = self.conn.lock().unwrap();
@@ -537,16 +543,17 @@ impl Database {
 
     // ============ PEER CACHE ============
 
-    pub fn upsert_peer_as_user(&self, device_id: &str, username: &str, public_key: Option<&str>) -> SqliteResult<()> {
+    pub fn upsert_peer_as_user(&self, device_id: &str, username: &str, public_key: Option<&str>, dingo_id: Option<&str>) -> SqliteResult<()> {
         let conn = self.conn.lock().unwrap();
         let now_str = Utc::now().to_rfc3339();
         conn.execute(
-            "INSERT INTO users (id,username,device_id,public_key,avatar_path,bio,designation,last_seen,is_online,created_at)
-             VALUES (?1,?2,?1,?3,NULL,'','',?4,1,?4)
+            "INSERT INTO users (id,username,device_id,public_key,avatar_path,bio,designation,last_seen,is_online,created_at,dingo_id)
+             VALUES (?1,?2,?1,?3,NULL,'','',?4,1,?4,?5)
              ON CONFLICT(id) DO UPDATE SET username=excluded.username,
                 public_key=COALESCE(excluded.public_key,users.public_key),
-                last_seen=excluded.last_seen, is_online=1",
-            params![device_id, username, public_key, now_str])?;
+                last_seen=excluded.last_seen, is_online=1,
+                dingo_id=COALESCE(excluded.dingo_id,users.dingo_id)",
+            params![device_id, username, public_key, now_str, dingo_id])?;
         Ok(())
     }
 

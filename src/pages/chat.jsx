@@ -2,6 +2,7 @@
 // Chat page — DM + Group messaging, file/image transfer via HTTP, message deletion
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAppContext, useChat, useGroups } from '../context/AppContext';
 import UserAvatar from '../components/UserAvatar';
 import Profile from '../components/Profile';
@@ -9,6 +10,7 @@ import * as avatarCache from '../lib/avatarCache';
 import ScreenshotCrop from '../components/ScreenshotCrop';
 import ImageLightbox from '../components/ImageLightbox';
 import * as api from '../lib/api';
+import relay from '../lib/relay';
 
 // ═══════════════════════════════════════════════════════════════
 //  Helper to resolve file URL from message content
@@ -49,6 +51,14 @@ export default function ChatPage() {
     } = useAppContext();
     const chat = useChat();
     const groupsHook = useGroups();
+    const navigate = useNavigate();
+
+    const handleStartCall = useCallback(async (type) => {
+        const peerId = chat.activePeer?.device_id;
+        if (!peerId) return;
+        const callRoomId = await api.generateUuid();
+        navigate('/meetings', { state: { startCall: { roomId: callRoomId, peerId, type } } });
+    }, [chat.activePeer, navigate]);
 
     const [search, setSearch] = useState('');
     const [tab, setTab] = useState('dm'); // 'dm' | 'groups'
@@ -58,6 +68,7 @@ export default function ChatPage() {
     const [confirmClearChat, setConfirmClearChat] = useState(false);
     const [screenshotData, setScreenshotData] = useState(null);
     const [showSharedMedia, setShowSharedMedia] = useState(false);
+    const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
     const [sharedMediaList, setSharedMediaList] = useState([]);
     const [sharedMediaTab, setSharedMediaTab] = useState('images'); // 'images' | 'files'
 
@@ -86,6 +97,73 @@ export default function ChatPage() {
         setToasts(prev => [...prev, { id, message, type }]);
         setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
     }, []);
+
+    // Search Dingo ID globally
+    const handleSearchDingoId = useCallback(async (queryId) => {
+        const handle = queryId.trim().replace(/^@/, '').toLowerCase();
+        if (!handle) return;
+
+        // 1. Search local user database — match by dingo_id OR username
+        try {
+            const all = await api.getAllUsers();
+            const localMatch = all.find(u =>
+                (u.dingo_id && u.dingo_id !== '' && u.dingo_id.toLowerCase() === handle) ||
+                u.username?.toLowerCase() === handle
+            );
+            if (localMatch) {
+                const peerObj = { device_id: localMatch.device_id || localMatch.id, ...localMatch };
+                chat.selectPeer(peerObj);
+                setSearch('');
+                showToast(`Found @${handle}!`, 'success');
+                return;
+            }
+        } catch (e) {
+            console.error('Local database query failed:', e);
+        }
+
+        // 2. Also search live network peers (mDNS-discovered, may not be in DB yet)
+        const liveMatch = (peers || []).find(p =>
+            p.username?.toLowerCase() === handle ||
+            p.device_id?.toLowerCase() === handle
+        );
+        if (liveMatch) {
+            chat.selectPeer(liveMatch);
+            setSearch('');
+            showToast(`Found @${handle} on your network!`, 'success');
+            return;
+        }
+
+        // 3. Search via WebSocket relay server (Internet discovery)
+        if (relay.isConnected) {
+            showToast(`Searching global relay for @${handle}…`, 'info');
+            try {
+                const user = await relay.findUser(handle);
+                if (user && user.deviceId) {
+                    // Register the user locally in the DB
+                    await api.upsertPeerUser(user.deviceId, user.username, null, user.dingoId);
+                    
+                    // Retrieve full object to ensure avatar_path etc are ready
+                    const localMatch = {
+                        id: user.deviceId,
+                        device_id: user.deviceId,
+                        username: user.username,
+                        dingo_id: user.dingoId,
+                        is_online: true, // assume online since we found them on relay
+                    };
+
+                    chat.selectPeer(localMatch);
+                    setSearch('');
+                    showToast(`Discovered @${handle} globally!`, 'success');
+                    return;
+                }
+            } catch (err) {
+                console.log('[relay] Search failed or timeout:', err.message);
+            }
+        }
+
+        // 4. Not found anywhere — show error toast
+        showToast(`User "@${handle}" not found. Make sure they are online or you have chatted before.`, 'error');
+    }, [chat.selectPeer, showToast, peers]);
 
     // Peer IP lookup
     const peerIpMap = useMemo(() => {
@@ -247,8 +325,15 @@ export default function ChatPage() {
         });
 
         if (search) {
-            const q = search.toLowerCase();
-            list = list.filter(u => u.username?.toLowerCase().includes(q));
+            const q = search.toLowerCase().replace(/^@/, '');
+            list = list.filter(u => {
+                const dingoId = (u.dingo_id || '').toLowerCase();
+                return (
+                    u.username?.toLowerCase().includes(q) ||
+                    (dingoId && dingoId.includes(q)) ||
+                    (u.device_id || u.id)?.toLowerCase().includes(q)
+                );
+            });
         }
         return list;
     }, [allUsers, peers, deviceId, lastMessages, search]);
@@ -782,15 +867,12 @@ export default function ChatPage() {
                 // Load all media messages from DB
                 const media = await api.getSharedMedia(peerId);
                 if (media) {
-                    // Annotate each with resolved URLs
-                    const port = fileServerPort || await api.getFileServerPort().catch(() => 0);
+                    // Annotate each with metadata (no URL yet — loaded lazily below)
                     const annotated = (media || []).map(m => {
                         try {
                             if (m.message_type === 'image' || m.message_type === 'video' || m.message_type === 'file') {
                                 const info = JSON.parse(m.content);
                                 if (info && info.fileId) {
-                                    const p = info.port || port || 0;
-                                    m._localDataUrl = `http://127.0.0.1:${p}/file/${info.fileId}`;
                                     m._fileName = info.fileName || 'file';
                                     m._fileType = info.type || m.message_type;
                                     m._fileId = info.fileId;
@@ -800,12 +882,25 @@ export default function ChatPage() {
                         return m;
                     });
                     setSharedMediaList(annotated);
+
+                    // Now eagerly load each file's dataUrl directly from disk
+                    // (same mechanism as main chat messages — avoids broken HTTP server URLs)
+                    for (const m of annotated) {
+                        if (m._fileId && !loadedFileIdsRef.current.has(m._fileId)) {
+                            api.readFileAsDataUrl(m._fileId).then(dataUrl => {
+                                if (dataUrl) {
+                                    loadedFileIdsRef.current.add(m._fileId);
+                                    setLoadedFileUrls(prev => ({ ...prev, [m._fileId]: dataUrl }));
+                                }
+                            }).catch(() => { /* file may not be local */ });
+                        }
+                    }
                 }
             } catch (e) {
                 console.warn('[Dingo] Failed to load shared media:', e);
             }
         })();
-    }, [showSharedMedia, chat.activePeer, fileServerPort]);
+    }, [showSharedMedia, chat.activePeer]);
 
     // ─── handle notification click — open specific chat ──────
     useEffect(() => {
@@ -1038,6 +1133,31 @@ export default function ChatPage() {
                 <div className="chat-search">
                     <input placeholder="Search contacts…" value={search} onChange={e => setSearch(e.target.value)} />
                 </div>
+
+                {search.startsWith('@') && search.trim().length > 1 && (
+                    <div 
+                        className="chat-item search-dingo-id-item" 
+                        onClick={() => handleSearchDingoId(search)}
+                        style={{
+                            display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+                            cursor: 'pointer', background: 'var(--primary-bg)', borderRadius: 8,
+                            margin: '8px 12px', border: '1px dashed var(--primary)'
+                        }}
+                    >
+                        <div style={{
+                            width: 32, height: 32, borderRadius: '50%', background: 'var(--primary)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 13
+                        }}>
+                            🔍
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+                            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--primary)' }}>Find Dingo ID online</span>
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                                Search for {search}
+                            </span>
+                        </div>
+                    </div>
+                )}
 
                 {/* Tabs */}
                 <div className="chat-tabs">
@@ -1374,16 +1494,14 @@ export default function ChatPage() {
                             </div>
                         </div>
                         <div className="chat-header-actions">
-                            <button className="icon-btn" title="Shared Media" onClick={() => setShowSharedMedia(true)}>
+                            <button className="icon-btn" title="Voice Call" onClick={() => handleStartCall('voice')} disabled={!isOnline}>
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                                    <circle cx="8.5" cy="8.5" r="1.5" />
-                                    <polyline points="21 15 16 10 5 21" />
+                                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
                                 </svg>
                             </button>
-                            <button className="icon-btn" title="Attach file" onClick={() => fileInputRef.current?.click()}>
+                            <button className="icon-btn" title="Video Call" onClick={() => handleStartCall('video')} disabled={!isOnline}>
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                                    <path d="M23 7a2 2 0 0 0-2.45-1.45L16 7V5a2 2 0 0 0-2-2H2a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2l4.55 1.45A2 2 0 0 0 23 17V7z" />
                                 </svg>
                             </button>
                             <button className="icon-btn danger" title="Clear all chat" onClick={() => setConfirmClearChat(true)}>
@@ -1604,12 +1722,36 @@ export default function ChatPage() {
                         </div>
                     )}
 
-                    <div className="chat-input-bar">
-                        <button className="icon-btn" title="Attach" onClick={() => fileInputRef.current?.click()}>
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <div className="chat-input-bar" style={{ position: 'relative' }}>
+                        <button
+                            className={`icon-btn toggle-attach-btn ${showAttachmentMenu ? 'active' : ''}`}
+                            title="Attach options"
+                            onClick={() => setShowAttachmentMenu(!showAttachmentMenu)}
+                        >
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transition: 'transform 0.2s', transform: showAttachmentMenu ? 'rotate(45deg)' : 'none' }}>
                                 <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
                             </svg>
                         </button>
+
+                        {showAttachmentMenu && (
+                            <div className="attachment-popover-menu">
+                                <button className="popover-item" onClick={() => { setShowSharedMedia(true); setShowAttachmentMenu(false); }}>
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                                        <circle cx="8.5" cy="8.5" r="1.5" />
+                                        <polyline points="21 15 16 10 5 21" />
+                                    </svg>
+                                    <span>Shared Media</span>
+                                </button>
+                                <button className="popover-item" onClick={() => { fileInputRef.current?.click(); setShowAttachmentMenu(false); }}>
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                                    </svg>
+                                    <span>Attach File</span>
+                                </button>
+                            </div>
+                        )}
+
                         <input
                             className="chat-input"
                             placeholder="Type a message…"
@@ -1657,8 +1799,7 @@ export default function ChatPage() {
                                         return (
                                             <div className="shared-media-grid">
                                                 {images.map(m => {
-                                                    let url = m._localDataUrl || '';
-                                                    if (m._fileId && loadedFileUrls[m._fileId]) url = loadedFileUrls[m._fileId];
+                                                    const url = (m._fileId && loadedFileUrls[m._fileId]) ? loadedFileUrls[m._fileId] : '';
                                                     return (
                                                         <div key={m.id} className="shared-media-thumb" onClick={() => setLightbox({ url, fileName: m._fileName || 'image' })}>
                                                             {m.message_type === 'video' ? (
@@ -1680,8 +1821,7 @@ export default function ChatPage() {
                                         return (
                                             <div className="shared-media-file-list">
                                                 {files.map(m => {
-                                                    let url = m._localDataUrl || '';
-                                                    if (m._fileId && loadedFileUrls[m._fileId]) url = loadedFileUrls[m._fileId];
+                                                    const url = (m._fileId && loadedFileUrls[m._fileId]) ? loadedFileUrls[m._fileId] : '';
                                                     const isMine = m.sender_id === deviceId;
                                                     return (
                                                         <div key={m.id} className="shared-media-file-item" onClick={() => handleOpenFileLocation(m)}>

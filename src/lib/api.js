@@ -23,9 +23,9 @@ function listen(event, handler) {
 export const initApp = () => invoke("init_app");
 
 // ================= USER =================
-export const createUser = (username, avatarPath = null, bio = null, designation = null) =>
+export const createUser = (username, avatarPath = null, bio = null, designation = null, dingoId = null) =>
   invoke("create_user", {
-    input: { username, avatar_path: avatarPath, bio, designation },
+    input: { username, avatar_path: avatarPath, bio, designation, dingo_id: dingoId },
   });
 
 export const getUser = (id) => invoke("get_user", { id });
@@ -43,6 +43,16 @@ export const sendMessage = (receiverId, content, messageType = "text", filePath 
       message_type: messageType,
       file_path: filePath,
     },
+  });
+
+export const storeIncomingMessage = (id, senderId, senderName, content, messageType = "text", createdAt = null) =>
+  invoke("store_incoming_message", {
+    id,
+    senderId,
+    senderName,
+    content,
+    messageType,
+    createdAt: createdAt || new Date().toISOString(),
   });
 
 export const getMessages = (peerId, limit = 100) =>
@@ -119,8 +129,18 @@ export const startSignaling = (port = 45678) =>
 export const registerPeer = (peerId, ip, port) =>
   invoke("register_peer", { peerId, ip, port });
 
-export const sendSignalingMessage = (peerId, message) =>
-  invoke("send_signaling_message", { peerId, message });
+export const sendSignalingMessage = (peerId, message) => {
+  const p2pPromise = invoke("send_signaling_message", { peerId, message });
+
+  // Parallel delivery via WebSocket relay for internet peers
+  import('./relay').then(({ relay }) => {
+    if (relay && relay.isConnected) {
+      relay.relay(peerId, message);
+    }
+  }).catch(() => {});
+
+  return p2pPromise;
+};
 
 // ================= ENCRYPTION =================
 export const establishSession = (peerId, peerPublicKey) =>
@@ -241,12 +261,14 @@ export const getStorageStats = () =>
 export const upsertPeerUser = (
   deviceId,
   username,
-  publicKey = null
+  publicKey = null,
+  dingoId = null
 ) =>
   invoke("upsert_peer_user", {
     deviceId,
     username,
     publicKey,
+    dingoId,
   });
 
 // ================= EVENTS =================
@@ -259,11 +281,25 @@ export const onPeerUpdated = (handler) =>
 export const onPeerLost = (handler) =>
   listen("peer-lost", handler);
 
-export const onSignalingMessage = (handler) =>
-  listen("signaling-message", handler);
+export const onSignalingMessage = (handler) => {
+  const unsubTauri = listen("signaling-message", handler);
+  const handleRelaySig = (e) => handler(e.detail);
+  window.addEventListener("dingo:signaling-message", handleRelaySig);
+  return () => {
+    unsubTauri.then?.(fn => fn?.());
+    window.removeEventListener("dingo:signaling-message", handleRelaySig);
+  };
+};
 
-export const onChatMessageReceived = (handler) =>
-  listen("chat-message-received", handler);
+export const onChatMessageReceived = (handler) => {
+  const unsubTauri = listen("chat-message-received", handler);
+  const handleRelayChat = (e) => handler(e.detail);
+  window.addEventListener("dingo:chat-message-received", handleRelayChat);
+  return () => {
+    unsubTauri.then?.(fn => fn?.());
+    window.removeEventListener("dingo:chat-message-received", handleRelayChat);
+  };
+};
 
 export const onUserDeleted = (handler) =>
   listen("user-deleted", handler);

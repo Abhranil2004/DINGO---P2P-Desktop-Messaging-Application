@@ -65,6 +65,10 @@ export default function MeetingsPage() {
   const [remoteScreens, setRemoteScreens] = useState(new Map());
   const [focusedScreen, setFocusedScreen] = useState(null);
   const [logs, setLogs] = useState([]);
+  const [isCameraSharing, setIsCameraSharing] = useState(false);
+  const [isCallingOutgoing, setIsCallingOutgoing] = useState(false);
+  const [callType, setCallType] = useState(null);
+  const [targetPeerId, setTargetPeerId] = useState(null);
 
   // ─── Refs ───────────────────────────────────────────────────
   const chatEndRef = useRef(null);
@@ -202,6 +206,7 @@ export default function MeetingsPage() {
           await negotiateWithPeer(msg.from);
         } else {
           showToast(`${peerNameMap[msg.from] || 'User'} declined the invite`, 'error');
+          leaveMeeting(true);
         }
         return;
       }
@@ -260,6 +265,11 @@ export default function MeetingsPage() {
       // Meeting ended by host
       if (msg.type === MSG.ENDED && msg.meeting_id === meetingIdRef.current) {
         showToast('Meeting ended by host', 'error');
+        // Destroy WebRTC connections immediately before leaving to prevent lingering streams
+        if (rtcRef.current) {
+          rtcRef.current.destroy();
+          rtcRef.current = null;
+        }
         leaveMeeting(true);
         return;
       }
@@ -381,11 +391,15 @@ export default function MeetingsPage() {
     setFocusedScreen(null);
     setScreenStream(null);
     setIsScreenSharing(false);
+    setIsCameraSharing(false);
+    setIsCallingOutgoing(false);
+    setCallType(null);
+    setTargetPeerId(null);
   }, []);
 
   // ─── Create Meeting (Host) ────────────────────────────────
-  const createMeeting = useCallback(async () => {
-    const id = await generateMeetingId();
+  const createMeeting = useCallback(async (customId = null) => {
+    const id = customId || await generateMeetingId();
     meetingLog(`Creating meeting ${id.slice(0, 8)}…`);
     setMeetingId(id);
     meetingIdRef.current = id;
@@ -397,7 +411,10 @@ export default function MeetingsPage() {
     setLogs([]);
     const mgr = initRTC(id);
     await mgr.acquireAudio();
-    showToast('Meeting created! Invite others to join.', 'success');
+    if (!customId) {
+      showToast('Meeting created! Invite others to join.', 'success');
+    }
+    return id;
   }, [initRTC, showToast]);
 
   // ─── Join Meeting by Code ─────────────────────────────────
@@ -545,6 +562,31 @@ export default function MeetingsPage() {
     showToast('Screen sharing stopped');
   }, [showToast]);
 
+  // ─── Camera Sharing ───────────────────────────────────────
+  const startCameraShare = useCallback(async (targetPeerIds = null) => {
+    const mgr = rtcRef.current;
+    if (!mgr) return;
+    if (isScreenSharing) {
+      stopScreenShare();
+    }
+    const stream = await mgr.startCameraShare(targetPeerIds);
+    if (stream) {
+      setScreenStream(stream);
+      setIsCameraSharing(true);
+      showToast('Camera sharing started');
+    } else {
+      showToast('Camera share cancelled', 'error');
+    }
+  }, [isScreenSharing, stopScreenShare, showToast]);
+
+  const stopCameraShare = useCallback(() => {
+    const mgr = rtcRef.current;
+    if (mgr) mgr.stopCameraShare();
+    setScreenStream(null);
+    setIsCameraSharing(false);
+    showToast('Camera sharing stopped');
+  }, [showToast]);
+
   // ─── Selective Screen Share ───────────────────────────────
   const startSelectiveShare = useCallback(async () => {
     if (selectedPeersForShare.length === 0) return;
@@ -593,6 +635,62 @@ export default function MeetingsPage() {
     setIsParticipantsOpen(false);
     setIsLogsOpen(false);
   }, []);
+
+  // ─── Direct WhatsApp Call Router Integrator ────────────────
+  useEffect(() => {
+    const startCall = location.state?.startCall;
+    const acceptCall = location.state?.acceptCall;
+
+    if (startCall && startCall.roomId) {
+      (async () => {
+        // Host creates the meeting with the custom call room ID
+        const mid = await createMeeting(startCall.roomId);
+        setCallType(startCall.type);
+        setTargetPeerId(startCall.peerId);
+        setIsCallingOutgoing(true);
+
+        // Send meeting call invite to the target peer!
+        try {
+          await sendMeetingInvite(
+            startCall.peerId,
+            deviceId,
+            mid,
+            localUser?.username || 'User',
+            startCall.type
+          );
+        } catch (e) {
+          console.error('[Call] Failed to send signaling invite:', e);
+        }
+
+        // If video call, auto start camera share!
+        if (startCall.type === 'video') {
+          // Wait briefly for media server init
+          setTimeout(() => {
+            startCameraShare();
+          }, 500);
+        }
+      })();
+    } else if (acceptCall && acceptCall.roomId) {
+      (async () => {
+        setCallType(acceptCall.type);
+        setTargetPeerId(acceptCall.peerId);
+        
+        // Direct WhatsApp Call Accept handshake
+        await handleAcceptInvite({
+          meeting_id: acceptCall.roomId,
+          from: acceptCall.peerId,
+          type: acceptCall.type,
+        });
+
+        // If video call, auto start camera share!
+        if (acceptCall.type === 'video') {
+          setTimeout(() => {
+            startCameraShare();
+          }, 500);
+        }
+      })();
+    }
+  }, [location.state, deviceId, localUser, createMeeting, joinMeetingByCode, startCameraShare, handleAcceptInvite]);
 
   // ═══════════════════════════════════════════════════════════════
   //  RENDER: Lobby
@@ -712,6 +810,33 @@ export default function MeetingsPage() {
           <div key={t.id} className={`mt-toast mt-toast-${t.type}`}>{t.message}</div>
         ))}
       </div>
+
+      {/* Outgoing Calling overlay (WhatsApp style outgoing call ringing screen) */}
+      {isCallingOutgoing && participants.length === 0 && (
+        <div className="global-call-overlay" style={{ position: 'absolute', zIndex: 100 }}>
+          <div className="global-call-card">
+            <div className="global-call-avatar-container">
+              <div className="global-call-avatar-ring" />
+              <div className="global-call-avatar-bg">
+                📞
+              </div>
+            </div>
+            <h2 className="global-call-peer-name">
+              {peerNameMap[targetPeerId] || 'User'}
+            </h2>
+            <p className="global-call-status">Calling ({callType === 'video' ? 'Video' : 'Voice'})...</p>
+            
+            <div className="global-call-actions">
+              <button className="global-call-btn decline" onClick={() => leaveMeeting()} title="Hang Up">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
+                  <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />
+                  <line x1="1" y1="1" x2="23" y2="23" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Pending Invites inside meeting */}
       {pendingInvites.length > 0 && (
@@ -922,6 +1047,17 @@ export default function MeetingsPage() {
             <span>{isScreenSharing ? 'Stop Share' : 'Share Screen'}</span>
           </button>
 
+          <button
+            className={`mt-ctrl-btn ${isCameraSharing ? 'mt-ctrl-btn-active' : ''}`}
+            onClick={() => isCameraSharing ? stopCameraShare() : startCameraShare()}
+            title="Toggle Camera"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M23 7a2 2 0 0 0-2.45-1.45L16 7V5a2 2 0 0 0-2-2H2a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2l4.55 1.45A2 2 0 0 0 23 17V7z" />
+            </svg>
+            <span>{isCameraSharing ? 'Camera Off' : 'Camera On'}</span>
+          </button>
+
           <button className="mt-ctrl-btn" onClick={() => setShowSharePicker(true)} title="Share to specific people">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
@@ -1023,8 +1159,15 @@ function VideoTile({ stream, label, muted = false, mini = false }) {
   const videoRef = useRef(null);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
+    const video = videoRef.current;
+    if (!video) return;
+    if (stream) {
+      video.srcObject = stream;
+      video.play().catch(() => {});
+    } else {
+      // Clear the video element when the stream ends so it doesn't show a frozen frame
+      video.pause();
+      video.srcObject = null;
     }
   }, [stream]);
 

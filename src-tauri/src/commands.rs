@@ -162,6 +162,8 @@ pub fn init_app(state: State<AppState>) -> Result<InitResult, String> {
             last_seen: Some(now()),
             is_online: true,
             created_at: now(),
+            dingo_id: None,
+            last_id_change: None,
         };
         state.db.create_user(&user).map_err(|e| e.to_string())?;
     } else {
@@ -196,6 +198,7 @@ pub struct CreateUserInput {
     pub avatar_path: Option<String>,
     pub bio: Option<String>,
     pub designation: Option<String>,
+    pub dingo_id: Option<String>,
 }
 
 #[tauri::command]
@@ -205,6 +208,55 @@ pub fn create_user(state: State<AppState>, input: CreateUserInput) -> Result<Use
         .db
         .get_user(&state.device_id)
         .map_err(|e| e.to_string())?;
+
+    let mut final_dingo_id = existing.as_ref().and_then(|u| u.dingo_id.clone());
+    let mut final_last_id_change = existing.as_ref().and_then(|u| u.last_id_change.clone());
+
+    if let Some(ref new_dingo_id) = input.dingo_id {
+        let is_changing = existing.as_ref()
+            .and_then(|u| u.dingo_id.as_ref())
+            .map(|old_id| old_id != new_dingo_id)
+            .unwrap_or(true);
+
+        if is_changing {
+            // Check uniqueness if they are changing to a non-empty handle
+            if !new_dingo_id.trim().is_empty() {
+                // Check if any other user in the local database has this claimed
+                let all_users = state.db.get_all_users().map_err(|e| e.to_string())?;
+                let is_taken = all_users.iter().any(|u| {
+                    u.id != state.device_id &&
+                    u.dingo_id.as_ref().map(|d| d.to_lowercase() == new_dingo_id.to_lowercase()).unwrap_or(false)
+                });
+                if is_taken {
+                    return Err(format!("The Dingo ID '{}' is already taken by another user.", new_dingo_id));
+                }
+            }
+
+            // Enforce 30-day cooldown if they had a previous handle
+            if let Some(ref old_id) = existing.as_ref().and_then(|u| u.dingo_id.as_ref()) {
+                if !old_id.trim().is_empty() {
+                    if let Some(ref last_change_str) = existing.as_ref().and_then(|u| u.last_id_change.as_ref()) {
+                        if !last_change_str.trim().is_empty() {
+                            if let Ok(last_change) = chrono::DateTime::parse_from_rfc3339(last_change_str) {
+                                let now_time = chrono::Utc::now();
+                                let duration = now_time.signed_duration_since(last_change.with_timezone(&chrono::Utc));
+                                if duration.num_days() < 30 {
+                                    let days_left = 30 - duration.num_days();
+                                    return Err(format!(
+                                        "You recently changed your Dingo ID. You must wait {} days before changing it again.",
+                                        days_left
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            final_dingo_id = Some(new_dingo_id.clone());
+            final_last_id_change = Some(now());
+        }
+    }
+
     let user = User {
         id: state.device_id.clone(),
         username: input.username,
@@ -222,6 +274,8 @@ pub fn create_user(state: State<AppState>, input: CreateUserInput) -> Result<Use
         last_seen: Some(now()),
         is_online: true,
         created_at: existing.map(|u| u.created_at).unwrap_or_else(now),
+        dingo_id: final_dingo_id,
+        last_id_change: final_last_id_change,
     };
     state.db.create_user(&user).map_err(|e| e.to_string())?;
     Ok(user)
@@ -279,6 +333,32 @@ pub fn send_message(state: State<AppState>, input: SendMessageInput) -> Result<M
         .db
         .create_message(&message)
         .map_err(|e| e.to_string())?;
+    Ok(message)
+}
+
+#[tauri::command]
+pub fn store_incoming_message(
+    state: State<AppState>,
+    id: String,
+    sender_id: String,
+    sender_name: String,
+    content: String,
+    message_type: Option<String>,
+    created_at: String,
+) -> Result<Message, String> {
+    let _ = state.db.upsert_peer_as_user(&sender_id, &sender_name, None, None);
+    let message = Message {
+        id,
+        sender_id,
+        receiver_id: state.device_id.clone(),
+        content,
+        message_type: message_type.unwrap_or_else(|| "text".into()),
+        file_path: None,
+        is_read: false,
+        is_delivered: true,
+        created_at,
+    };
+    state.db.create_message(&message).map_err(|e| e.to_string())?;
     Ok(message)
 }
 
@@ -418,6 +498,7 @@ pub fn start_discovery<R: Runtime>(
                                 &peer.device_id,
                                 &peer.username,
                                 Some(&peer.public_key),
+                                None,
                             );
                             // Auto-register peer in signaling for reliable message delivery
                             let _ = signaling.register_peer(
@@ -432,6 +513,7 @@ pub fn start_discovery<R: Runtime>(
                                 &peer.device_id,
                                 &peer.username,
                                 Some(&peer.public_key),
+                                None,
                             );
                             let _ = signaling.register_peer(
                                 &peer.device_id,
@@ -505,7 +587,7 @@ pub fn start_signaling<R: Runtime>(
                         println!("[Dingo] Received chat message from {}", sender_name);
 
                         // Ensure the peer exists in users table
-                        let _ = db.upsert_peer_as_user(from, sender_name, None);
+                        let _ = db.upsert_peer_as_user(from, sender_name, None, None);
 
                         // If we have a peer connection (UDP address) for this sender, expose it to the UI
                         if let Some(pc) = signaling.get_peer(&from) {
@@ -601,7 +683,7 @@ pub fn start_signaling<R: Runtime>(
                         ..
                     } => {
                         println!("[Dingo] Received profile update from {}", from);
-                        let _ = db.upsert_peer_as_user(from, username, None);
+                        let _ = db.upsert_peer_as_user(from, username, None, None);
 
                         // Resolve avatar URL
                         let resolved_avatar: Option<String> = if let Some(url) = avatar_url {
@@ -716,7 +798,7 @@ pub fn start_signaling<R: Runtime>(
                             &group_id[..8.min(group_id.len())]
                         );
                         // Ensure the peer exists in users table
-                        let _ = db.upsert_peer_as_user(&from, &sender_name, None);
+                        let _ = db.upsert_peer_as_user(&from, &sender_name, None, None);
                         // Store as group message
                         let gmsg = GroupMessage {
                             id: id.clone(),
@@ -1004,10 +1086,11 @@ pub fn upsert_peer_user(
     device_id: String,
     username: String,
     public_key: Option<String>,
+    dingo_id: Option<String>,
 ) -> Result<(), String> {
     state
         .db
-        .upsert_peer_as_user(&device_id, &username, public_key.as_deref())
+        .upsert_peer_as_user(&device_id, &username, public_key.as_deref(), dingo_id.as_deref())
         .map_err(|e| e.to_string())
 }
 

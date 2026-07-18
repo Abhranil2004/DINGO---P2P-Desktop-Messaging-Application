@@ -15,6 +15,9 @@ const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+  { urls: 'stun:stun4.l.google.com:19302' },
+  { urls: 'stun:global.stun.twilio.com:3478' }
 ];
 const RECONNECT_DELAY_MS = 3000;
 
@@ -455,5 +458,82 @@ export default class MeetingRTCManager {
       hasLocalScreen: !!this.localScreenStream,
       connections: conns,
     };
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  Camera Sharing
+  // ═══════════════════════════════════════════════════════════
+
+  async startCameraShare(targetPeerIds) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480, frameRate: 24 },
+        audio: false,
+      });
+      this.localScreenStream = stream; // Treat it as screen share to reuse rendering pipeline
+      this._log('Camera sharing started');
+
+      // Add track ended handler
+      stream.getVideoTracks()[0].onended = () => {
+        this._log('Camera share track ended');
+        this.stopCameraShare(targetPeerIds);
+      };
+
+      // Add tracks to target connections
+      const targets = targetPeerIds || Array.from(this.peerConnections.keys());
+      for (const pid of targets) {
+        const pc = this.peerConnections.get(pid);
+        if (pc) {
+          stream.getTracks().forEach(t => {
+            try { pc.addTrack(t, stream); } catch { }
+          });
+          // Renegotiate
+          try {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            await sendMeetingOffer(pid, this.deviceId, this.meetingId, offer.sdp);
+          } catch (err) {
+            this._log(`Renegotiate after camera share failed [${pid.slice(0, 8)}]: ${err}`, 'error');
+          }
+        }
+      }
+
+      // Notify peers that we are sharing video
+      for (const pid of targets) {
+        try {
+          await sendMeetingScreenShare(pid, this.deviceId, this.meetingId, true);
+        } catch { }
+      }
+
+      return stream;
+    } catch (err) {
+      this._log(`Camera share failed: ${err}`, 'error');
+      return null;
+    }
+  }
+
+  stopCameraShare(targetPeerIds) {
+    if (this.localScreenStream) {
+      this.localScreenStream.getTracks().forEach(t => t.stop());
+      this.localScreenStream = null;
+    }
+
+    // Remove video senders
+    for (const [, pc] of this.peerConnections) {
+      const senders = pc.getSenders();
+      senders.forEach(s => {
+        if (s.track?.kind === 'video') {
+          try { pc.removeTrack(s); } catch { }
+        }
+      });
+    }
+
+    // Notify peers
+    const targets = targetPeerIds || Array.from(this.peerConnections.keys());
+    for (const pid of targets) {
+      sendMeetingScreenShare(pid, this.deviceId, this.meetingId, false).catch(() => { });
+    }
+
+    this._log('Camera sharing stopped');
   }
 }

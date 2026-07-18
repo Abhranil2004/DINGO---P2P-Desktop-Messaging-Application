@@ -7,6 +7,7 @@ import * as avatarCache from '../lib/avatarCache';
 import * as chatLogger from '../lib/chatLogger';
 import { compressDataUrlIfNeeded } from '../lib/avatarUtils';
 import { initNotifications, showMessageNotification, getLastNotification, clearNotificationHistory } from '../lib/notifications';
+import relay from '../lib/relay';
 
 // ═══════════════════════════════════════════════════════════════
 //  useApp  —  top-level app state
@@ -21,12 +22,16 @@ export function useApp() {
     const [unreadCounts, setUnreadCounts] = useState({});
     const [lastMessages, setLastMessages] = useState({});
     const [fileServerPort, setFileServerPort] = useState(0);
+    const [signalingPort, setSignalingPort] = useState(45678);
+    const [theme, setTheme] = useState('system');
+    const [incomingCall, setIncomingCall] = useState(null);
     const peerMapRef = useRef(new Map());
 
     // Refs for values needed in event handlers (avoids stale closures)
     const localUserRef = useRef(null);
     const deviceIdRef = useRef('');
     const fileServerPortRef = useRef(0);
+    const signalingPortRef = useRef(45678);
     // Track currently active chat peer — messages from this peer won't increment unread
     const activeChatPeerIdRef = useRef(null);
     const allUsersRef = useRef([]);
@@ -35,6 +40,7 @@ export function useApp() {
     useEffect(() => { localUserRef.current = localUser; }, [localUser]);
     useEffect(() => { deviceIdRef.current = deviceId; }, [deviceId]);
     useEffect(() => { fileServerPortRef.current = fileServerPort; }, [fileServerPort]);
+    useEffect(() => { signalingPortRef.current = signalingPort; }, [signalingPort]);
     useEffect(() => { allUsersRef.current = allUsers || []; }, [allUsers]);
 
     // Allow external code (chat page) to track which peer chat is currently open
@@ -180,6 +186,19 @@ export function useApp() {
                 const init = await api.initApp();
                 api.appendDevLog && api.appendDevLog('[Dingo] initApp returned').catch(() => { });
                 if (cancelled) return;
+
+                // Load theme setting from DB
+                try {
+                    const themeSetting = await api.getSetting('theme');
+                    if (themeSetting) {
+                        setTheme(themeSetting);
+                    } else {
+                        await api.setSetting('theme', 'system');
+                    }
+                } catch (e) {
+                    console.warn('[Dingo] Failed to load theme setting on init:', e);
+                }
+
                 setDeviceId(init.device_id);
                 deviceIdRef.current = init.device_id;
 
@@ -189,13 +208,21 @@ export function useApp() {
                     localUserRef.current = user;
                 }
 
-                // Start signaling
-                await api.startSignaling(45678);
-                api.appendDevLog && api.appendDevLog('[Dingo] startSignaling returned').catch(() => { });
+                // Start signaling — capture the ACTUAL port the OS assigned
+                let actualSignalingPort = 45678;
+                try {
+                    actualSignalingPort = await api.startSignaling(45678);
+                    setSignalingPort(actualSignalingPort);
+                    signalingPortRef.current = actualSignalingPort;
+                } catch (e) {
+                    console.warn('[Dingo] startSignaling failed, using default 45678:', e);
+                    actualSignalingPort = 45678;
+                }
+                api.appendDevLog && api.appendDevLog('[Dingo] startSignaling returned port=' + actualSignalingPort).catch(() => { });
 
-                // Start discovery
+                // Start discovery — pass the actual signaling port so peers can reach us
                 const username = user?.username || 'Dingo User';
-                await api.startDiscovery(username, 45678);
+                await api.startDiscovery(username, actualSignalingPort);
                 api.appendDevLog && api.appendDevLog('[Dingo] startDiscovery returned').catch(() => { });
 
                 // Get file server port
@@ -274,6 +301,17 @@ export function useApp() {
                 finished = true;
                 clearTimeout(wb);
                 api.appendDevLog && api.appendDevLog('[Dingo] bootstrap complete').catch(() => { });
+
+                // ── Connect to relay server for internet P2P ──────────
+                // This runs after init so we have deviceId, dingoId, username
+                try {
+                    const dingoId = user?.dingo_id || '';
+                    const uname   = user?.username || 'Dingo User';
+                    relay.connect(init.device_id, dingoId, uname);
+                    console.log('[Dingo] Relay client connecting...');
+                } catch (relayErr) {
+                    console.warn('[Dingo] Relay connect failed (non-fatal):', relayErr);
+                }
             } catch (err) {
                 console.error('[Dingo] Init failed:', err);
                 api.appendDevLog && api.appendDevLog('[Dingo] init failed: ' + String(err)).catch(() => { });
@@ -570,6 +608,7 @@ export function useApp() {
                     ...(msg.username && { username: msg.username }),
                     ...(msg.bio !== undefined && { bio: msg.bio }),
                     ...(msg.designation !== undefined && { designation: msg.designation }),
+                    ...(msg.dingo_id !== undefined && { dingo_id: msg.dingo_id }),
                     // Clear the presence-lock flag so the new name sticks
                     _presenceUsernameLocked: false,
                 };
@@ -618,6 +657,7 @@ export function useApp() {
                                 ...(msg.username && { username: msg.username }),
                                 ...(msg.bio !== undefined && { bio: msg.bio }),
                                 ...(msg.designation !== undefined && { designation: msg.designation }),
+                                ...(msg.dingo_id !== undefined && { dingo_id: msg.dingo_id }),
                                 ...(updated.avatar_path && { avatar_path: updated.avatar_path }),
                             }
                             : u
@@ -632,7 +672,18 @@ export function useApp() {
                         avatar_path: updated.avatar_path,
                         bio: msg.bio,
                         designation: msg.designation,
+                        dingo_id: msg.dingo_id,
                     }];
+                });
+            }
+
+            // Listen for direct voice/video meeting calls (WhatsApp style)
+            if (msg?.type === 'MeetingInvite' && msg?.call_type) {
+                setIncomingCall({
+                    roomId: msg.meeting_id,
+                    peerId: msg.from,
+                    peerName: msg.host_name || 'Someone',
+                    type: msg.call_type
                 });
             }
         }));
@@ -787,8 +838,14 @@ export function useApp() {
             fields.avatar_path ?? localUser.avatar_path,
             fields.bio ?? localUser.bio,
             fields.designation ?? localUser.designation,
+            fields.dingo_id ?? localUser.dingo_id,
         );
-        if (updated) setLocalUser(updated);
+        if (updated) {
+            setLocalUser(updated);
+            try {
+                relay.updateProfile(updated.dingo_id || '', updated.username || '');
+            } catch (err) { /* ignore */ }
+        }
 
         // *** CRITICAL: Broadcast profile update to ALL peers immediately ***
         // This ensures peers get the new username/bio/designation synchronously
@@ -797,7 +854,8 @@ export function useApp() {
             (fields.username && fields.username !== localUser.username) ||
             (fields.bio && fields.bio !== localUser.bio) ||
             (fields.designation && fields.designation !== localUser.designation) ||
-            (fields.avatar_path && fields.avatar_path !== localUser.avatar_path);
+            (fields.avatar_path && fields.avatar_path !== localUser.avatar_path) ||
+            (fields.dingo_id && fields.dingo_id !== localUser.dingo_id);
 
         if (hasChanges) {
             try {
@@ -813,6 +871,7 @@ export function useApp() {
                                 username: fields.username ?? (updated?.username ?? ''),
                                 bio: fields.bio ?? (updated?.bio ?? ''),
                                 designation: fields.designation ?? (updated?.designation ?? ''),
+                                dingo_id: fields.dingo_id ?? (updated?.dingo_id ?? ''),
                             };
 
                             // If avatar is a data URL, compress it
@@ -837,9 +896,9 @@ export function useApp() {
             } catch (e) { /* ignore */ }
         }
 
-        // Restart discovery with new username
+        // Restart discovery with new username — use the actual signaling port
         if (fields.username && fields.username !== localUser.username) {
-            try { await api.restartDiscovery(fields.username, 45678); } catch { /* ok */ }
+            try { await api.restartDiscovery(fields.username, signalingPortRef.current || 45678); } catch { /* ok */ }
             // Rename download folder for old username
             try { await api.renameUserDownloadFolder(oldUsername, fields.username); } catch { /* ok */ }
         }
@@ -921,12 +980,59 @@ export function useApp() {
         return () => { if (typeof window !== 'undefined') delete window.dingoFlushPending; };
     }, [flushPendingMessages]);
 
+    const applyTheme = useCallback((themeValue) => {
+        const root = document.body;
+        if (themeValue === 'dark') {
+            root.classList.add('dark');
+        } else if (themeValue === 'light') {
+            root.classList.remove('dark');
+        } else {
+            // system
+            const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            if (systemPrefersDark) {
+                root.classList.add('dark');
+            } else {
+                root.classList.remove('dark');
+            }
+        }
+    }, []);
+
+    const updateTheme = useCallback(async (newTheme) => {
+        try {
+            await api.setSetting('theme', newTheme);
+            setTheme(newTheme);
+        } catch (e) {
+            console.error('[Dingo] Failed to save theme setting:', e);
+        }
+    }, []);
+
+    // Apply theme changes
+    useEffect(() => {
+        applyTheme(theme);
+
+        if (theme === 'system') {
+            const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+            const handleSystemThemeChange = (e) => {
+                const root = document.body;
+                if (e.matches) {
+                    root.classList.add('dark');
+                } else {
+                    root.classList.remove('dark');
+                }
+            };
+            mediaQuery.addEventListener('change', handleSystemThemeChange);
+            return () => mediaQuery.removeEventListener('change', handleSystemThemeChange);
+        }
+    }, [theme, applyTheme]);
+
     return {
         localUser, deviceId, peers, allUsers, initialized, error,
-        unreadCounts, lastMessages, fileServerPort,
+        unreadCounts, lastMessages, fileServerPort, signalingPort,
         updateProfile, saveAvatar, clearUnread, refreshLastMessages,
         flushPendingMessages, // exported for UI/debug
         setLocalUser, setActiveChatPeerId, peerMapRef,
+        theme, updateTheme,
+        incomingCall, setIncomingCall,
     };
 }
 
@@ -1058,13 +1164,28 @@ export function useChat() {
         if (msg) {
             setMessages(prev => [...prev, msg]);
             chatLogger.log('send', `Message saved: ${msg.id.slice(0, 8)}…`, { messageId: msg.id, peerId });
-            // Relay via UDP signaling
+            
+            // 1. Try UDP signaling
             try {
                 await api.relayChatMessage(peerId, msg.id, text, 'text', senderName || '');
                 chatLogger.log('relay', `Relay attempted: ${msg.id.slice(0, 8)}… → ${peerId.slice(0, 8)}…`, { messageId: msg.id, peerId });
             } catch (e) {
                 chatLogger.log('error', `Relay failed: ${msg.id.slice(0, 8)}… → ${peerId.slice(0, 8)}…`, { messageId: msg.id, peerId, error: String(e) });
-                console.warn('Relay failed:', e);
+                console.warn('Local relay failed, trying WebSocket relay:', e);
+            }
+
+            // 2. Try WebSocket relay (Internet route)
+            if (relay.isConnected) {
+                relay.relay(peerId, {
+                    type: 'ChatMessage',
+                    id: msg.id,
+                    content: text,
+                    message_type: 'text',
+                    sender_name: senderName || '',
+                    timestamp: msg.created_at,
+                    from: deviceIdRef.current
+                });
+                chatLogger.log('relay', `WebSocket relay sent: ${msg.id.slice(0, 8)}…`, { messageId: msg.id, peerId });
             }
         } else {
             chatLogger.log('error', `Failed to save message to DB`, { peerId });
@@ -1094,13 +1215,28 @@ export function useChat() {
                     _isLoading: false,
                 }]);
                 chatLogger.log('send', `File message saved: ${msg.id.slice(0, 8)}…`, { messageId: msg.id, fileId, fileName });
-                // Relay file metadata to peer
+                
+                // 1. Try UDP signaling
                 try {
                     await api.relayChatMessage(peerId, msg.id, fileInfo, messageType, senderName || '');
                     chatLogger.log('relay', `File relay attempted: ${msg.id.slice(0, 8)}…`, { messageId: msg.id, peerId });
                 } catch (e) {
                     chatLogger.log('error', `File relay failed: ${msg.id.slice(0, 8)}…`, { messageId: msg.id, peerId, error: String(e) });
-                    console.warn('File relay failed:', e);
+                    console.warn('Local file relay failed, trying WebSocket relay:', e);
+                }
+
+                // 2. Try WebSocket relay (Internet route)
+                if (relay.isConnected) {
+                    relay.relay(peerId, {
+                        type: 'ChatMessage',
+                        id: msg.id,
+                        content: fileInfo,
+                        message_type: messageType,
+                        sender_name: senderName || '',
+                        timestamp: msg.created_at,
+                        from: deviceIdRef.current
+                    });
+                    chatLogger.log('relay', `WebSocket file relay sent: ${msg.id.slice(0, 8)}…`, { messageId: msg.id, peerId });
                 }
             }
             return msg;

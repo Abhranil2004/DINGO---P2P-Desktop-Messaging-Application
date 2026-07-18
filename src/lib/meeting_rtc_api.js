@@ -22,13 +22,14 @@ export const MSG = Object.freeze({
 
 // ─── Send helpers (typed, validated) ─────────────────────────
 
-export async function sendMeetingInvite(peerId, from, meetingId, hostName) {
+export async function sendMeetingInvite(peerId, from, meetingId, hostName, callType = null) {
   return api.sendSignalingMessage(peerId, {
     type: MSG.INVITE,
     from,
     to: peerId,
     meeting_id: meetingId,
     host_name: hostName,
+    call_type: callType,
   });
 }
 

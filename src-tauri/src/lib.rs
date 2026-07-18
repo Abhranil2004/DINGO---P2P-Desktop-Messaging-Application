@@ -74,6 +74,7 @@ pub fn run() {
             commands::get_local_user,
             // Message commands
             commands::send_message,
+            commands::store_incoming_message,
             commands::get_messages,
             commands::mark_message_read,
             commands::get_unread_count,
@@ -325,6 +326,8 @@ mod integration_tests {
             last_seen: Some(crate::db::now()),
             is_online: true,
             created_at: crate::db::now(),
+            dingo_id: None,
+            last_id_change: None,
         };
         state_a.db.create_user(&user_a).unwrap();
 
@@ -339,6 +342,8 @@ mod integration_tests {
             last_seen: Some(crate::db::now()),
             is_online: true,
             created_at: crate::db::now(),
+            dingo_id: None,
+            last_id_change: None,
         };
         state_a.db.create_user(&user_b).unwrap();
 

@@ -1,0 +1,16 @@
+{
+  "name": "dingo-relay-server",
+  "version": "1.0.0",
+  "description": "WebSocket relay server for Dingo P2P Messaging — enables cross-internet user discovery and message relay",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

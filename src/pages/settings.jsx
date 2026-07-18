@@ -1,10 +1,154 @@
 // src/pages/settings.jsx
 // Settings page — general preferences, notifications, storage, about
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAppContext } from '../context/AppContext';
 import * as api from '../lib/api';
 import * as chatLogger from '../lib/chatLogger';
+import UserAvatar from '../components/UserAvatar';
+
+function AvatarCropperModal({ src, onApply, onCancel }) {
+    const [zoom, setZoom] = useState(1);
+    const [pan, setPan] = useState({ x: 0, y: 0 });
+    const [imgSize, setImgSize] = useState({ width: 180, height: 180 });
+    const [isDragging, setIsDragging] = useState(false);
+    const dragStart = useRef({ x: 0, y: 0 });
+    const imageRef = useRef(null);
+
+    const handlePointerDown = (e) => {
+        setIsDragging(true);
+        dragStart.current = { x: e.clientX - pan.x, y: e.clientY - pan.y };
+        e.target.setPointerCapture(e.pointerId);
+    };
+
+    const handlePointerMove = (e) => {
+        if (!isDragging) return;
+        setPan({
+            x: e.clientX - dragStart.current.x,
+            y: e.clientY - dragStart.current.y
+        });
+    };
+
+    const handlePointerUp = (e) => {
+        setIsDragging(false);
+    };
+
+    const handleImageLoad = (e) => {
+        const { naturalWidth, naturalHeight } = e.target;
+        if (!naturalWidth || !naturalHeight) return;
+        if (naturalWidth >= naturalHeight) {
+            // Landscape or square: fit height to 180px
+            const w = (naturalWidth / naturalHeight) * 180;
+            setImgSize({ width: w, height: 180 });
+        } else {
+            // Portrait: fit width to 180px
+            const h = (naturalHeight / naturalWidth) * 180;
+            setImgSize({ width: 180, height: h });
+        }
+    };
+
+    const handleSave = () => {
+        const img = imageRef.current;
+        if (!img) return;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 250;
+        canvas.height = 250;
+        const ctx = canvas.getContext('2d');
+
+        // Draw white background
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, 250, 250);
+
+        // Viewport mask size is 180px, canvas target is 250px
+        const scale = 250 / 180;
+
+        ctx.save();
+        ctx.translate(125, 125);
+        ctx.scale(zoom * scale, zoom * scale);
+        ctx.translate(pan.x / zoom, pan.y / zoom);
+        
+        // Draw the image centered matching the visual dimensions exactly
+        ctx.drawImage(img, -imgSize.width / 2, -imgSize.height / 2, imgSize.width, imgSize.height);
+        ctx.restore();
+
+        const croppedDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+        onApply(croppedDataUrl);
+    };
+
+    return (
+        <div className="cropper-modal-overlay" style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.85)', display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: 20
+        }}>
+            <div className="cropper-modal-content" style={{
+                background: 'var(--bg-primary)', borderRadius: 16, padding: 24,
+                width: '100%', maxWidth: 360, display: 'flex', flexDirection: 'column',
+                alignItems: 'center', gap: 20, boxShadow: '0 8px 30px rgba(0,0,0,0.5)',
+                border: '1px solid var(--border)'
+            }}>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>
+                    Adjust Profile Picture
+                </h3>
+                
+                {/* Viewport Mask */}
+                <div style={{
+                    position: 'relative', width: 180, height: 180, borderRadius: '50%',
+                    overflow: 'hidden', border: '2px solid var(--primary)',
+                    cursor: 'move', background: '#000', touchAction: 'none'
+                }}
+                    onPointerDown={handlePointerDown}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                >
+                    <img
+                        ref={imageRef}
+                        src={src}
+                        alt="Crop preview"
+                        onLoad={handleImageLoad}
+                        style={{
+                            position: 'absolute',
+                            left: '50%',
+                            top: '50%',
+                            width: `${imgSize.width}px`,
+                            height: `${imgSize.height}px`,
+                            transform: `translate(-50%, -50%) translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                            transformOrigin: 'center',
+                            pointerEvents: 'none'
+                        }}
+                    />
+                </div>
+
+                {/* Controls */}
+                <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-secondary)' }}>
+                        <span>Zoom</span>
+                        <span>{Math.round(zoom * 100)}%</span>
+                    </div>
+                    <input
+                        type="range"
+                        min="1"
+                        max="3"
+                        step="0.02"
+                        value={zoom}
+                        onChange={(e) => setZoom(parseFloat(e.target.value))}
+                        style={{ width: '100%', cursor: 'pointer', accentColor: 'var(--primary)' }}
+                    />
+                </div>
+
+                <div style={{ display: 'flex', gap: 12, width: '100%', marginTop: 8 }}>
+                    <button className="btn-primary" style={{ flex: 1 }} onClick={handleSave}>
+                        Apply
+                    </button>
+                    <button className="btn-secondary" style={{ flex: 1 }} onClick={onCancel}>
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
 
 function formatBytes(bytes) {
     if (!bytes || bytes === 0) return '0 B';
@@ -289,10 +433,21 @@ function ChatLogsSection() {
 
 
 export default function SettingsPage() {
-    const { localUser, updateProfile, deviceId } = useAppContext();
+    const { localUser, updateProfile, deviceId, theme, updateTheme, signalingPort, fileServerPort } = useAppContext();
     const [settings, setSettings] = useState({});
     const [notifMuted, setNotifMuted] = useState(false);
     const [saved, setSaved] = useState(false);
+
+    // Profile editing state variables
+    const [isEditingProfile, setIsEditingProfile] = useState(false);
+    const [editUsername, setEditUsername] = useState('');
+    const [editBio, setEditBio] = useState('');
+    const [editDesignation, setEditDesignation] = useState('');
+    const [editAvatar, setEditAvatar] = useState('');
+    const [editDingoId, setEditDingoId] = useState('');
+    const [showCropper, setShowCropper] = useState(false);
+    const [cropImageSrc, setCropImageSrc] = useState('');
+    const avatarInputRef = useRef(null);
 
     useEffect(() => {
         (async () => {
@@ -323,6 +478,41 @@ export default function SettingsPage() {
         setTimeout(() => setSaved(false), 2000);
     }, []);
 
+    const handleAvatarChange = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            setCropImageSrc(reader.result);
+            setShowCropper(true);
+        };
+        reader.readAsDataURL(file);
+        e.target.value = '';
+    };
+
+    const handleSaveProfile = async () => {
+        if (!editUsername.trim()) {
+            alert('Username cannot be empty');
+            return;
+        }
+        const cleanHandle = editDingoId.trim().replace(/^@/, '');
+        try {
+            await updateProfile({
+                username: editUsername.trim(),
+                bio: editBio.trim(),
+                designation: editDesignation.trim(),
+                avatar_path: editAvatar,
+                dingo_id: cleanHandle,
+            });
+            setIsEditingProfile(false);
+            setSaved(true);
+            setTimeout(() => setSaved(false), 2000);
+        } catch (e) {
+            console.error('Failed to update profile:', e);
+            alert(e?.toString() || 'Failed to update profile');
+        }
+    };
+
     return (
         <div className="settings-page">
             <div className="settings-container">
@@ -330,22 +520,185 @@ export default function SettingsPage() {
 
                 {/* ── Profile section ── */}
                 <section className="settings-section">
-                    <h3>Profile</h3>
-                    <div className="settings-profile-info">
-                        <div className="settings-row">
-                            <span className="settings-label">Username</span>
-                            <span className="settings-value">{localUser?.username || '—'}</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                        <h3>Profile</h3>
+                        {!isEditingProfile && (
+                            <button className="btn-secondary btn-sm" onClick={() => {
+                                setEditUsername(localUser?.username || '');
+                                setEditBio(localUser?.bio || '');
+                                setEditDesignation(localUser?.designation || '');
+                                setEditAvatar(localUser?.avatar_path || '');
+                                setEditDingoId(localUser?.dingo_id || '');
+                                setIsEditingProfile(true);
+                            }}>
+                                Edit Profile
+                            </button>
+                        )}
+                    </div>
+
+                    {isEditingProfile ? (
+                        <div className="settings-profile-edit" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 10 }}>
+                                <div style={{ position: 'relative', cursor: 'pointer' }} onClick={() => avatarInputRef.current?.click()}>
+                                    <UserAvatar name={editUsername || localUser?.username} size={64} avatarUrl={editAvatar} />
+                                    <div style={{
+                                        position: 'absolute', bottom: 0, right: 0, background: 'var(--primary)',
+                                        borderRadius: '50%', width: 24, height: 24, display: 'flex',
+                                        alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 12,
+                                        boxShadow: '0 2px 6px rgba(0,0,0,0.3)'
+                                    }}>
+                                        📷
+                                    </div>
+                                </div>
+                                <input
+                                    ref={avatarInputRef}
+                                    type="file"
+                                    accept="image/*"
+                                    hidden
+                                    onChange={handleAvatarChange}
+                                />
+                                <div>
+                                    <button className="btn-secondary btn-sm" onClick={() => avatarInputRef.current?.click()}>
+                                        Change Photo
+                                    </button>
+                                    {editAvatar && (
+                                        <button className="btn-sm" style={{ color: 'var(--danger)', marginLeft: 8, background: 'none', border: 'none', cursor: 'pointer' }} onClick={() => setEditAvatar('')}>
+                                            Remove
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>Username</label>
+                                <input
+                                    className="settings-input"
+                                    value={editUsername}
+                                    onChange={e => setEditUsername(e.target.value)}
+                                    placeholder="Username"
+                                    style={{
+                                        width: '100%', padding: '8px 12px', borderRadius: 8,
+                                        border: '1px solid var(--border)', background: 'var(--bg-secondary)',
+                                        color: 'var(--text)', fontSize: 13
+                                    }}
+                                />
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>Dingo ID (Handle)</label>
+                                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                                    <span style={{ position: 'absolute', left: 10, color: 'var(--text-muted)', fontSize: 13 }}>@</span>
+                                    <input
+                                        className="settings-input"
+                                        value={editDingoId}
+                                        onChange={e => setEditDingoId(e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, ''))}
+                                        placeholder="your_id"
+                                        style={{
+                                            width: '100%', padding: '8px 12px 8px 24px', borderRadius: 8,
+                                            border: '1px solid var(--border)', background: 'var(--bg-secondary)',
+                                            color: 'var(--text)', fontSize: 13
+                                        }}
+                                    />
+                                </div>
+                                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                    Your unique handle (e.g. @dev_abhra). You can change it once every 30 days.
+                                </span>
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>Designation</label>
+                                <input
+                                    className="settings-input"
+                                    value={editDesignation}
+                                    onChange={e => setEditDesignation(e.target.value)}
+                                    placeholder="e.g. Developer, Designer"
+                                    style={{
+                                        width: '100%', padding: '8px 12px', borderRadius: 8,
+                                        border: '1px solid var(--border)', background: 'var(--bg-secondary)',
+                                        color: 'var(--text)', fontSize: 13
+                                    }}
+                                />
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>Bio</label>
+                                <textarea
+                                    className="settings-textarea"
+                                    value={editBio}
+                                    onChange={e => setEditBio(e.target.value)}
+                                    placeholder="Write something about yourself…"
+                                    style={{
+                                        width: '100%', padding: '8px 12px', borderRadius: 8,
+                                        border: '1px solid var(--border)', background: 'var(--bg-secondary)',
+                                        color: 'var(--text)', fontSize: 13, minHeight: 80, resize: 'vertical'
+                                    }}
+                                />
+                            </div>
+
+                            <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                                <button className="btn-primary" onClick={handleSaveProfile}>Save Changes</button>
+                                <button className="btn-secondary" onClick={() => setIsEditingProfile(false)}>Cancel</button>
+                            </div>
                         </div>
-                        <div className="settings-row">
-                            <span className="settings-label">Device ID</span>
-                            <span className="settings-value" style={{ fontSize: 11, fontFamily: 'monospace' }}>
-                                {deviceId?.slice(0, 24)}…
-                            </span>
+                    ) : (
+                        <div className="settings-profile-info" style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+                            <UserAvatar name={localUser?.username} size={64} avatarUrl={localUser?.avatar_path} />
+                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                    <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>
+                                        {localUser?.username || '—'}
+                                    </span>
+                                    {localUser?.designation && (
+                                        <span style={{
+                                            fontSize: 11, padding: '2px 8px', borderRadius: 12,
+                                            background: 'var(--primary-bg)', color: 'var(--primary)',
+                                            fontWeight: 600
+                                        }}>
+                                            {localUser.designation}
+                                        </span>
+                                    )}
+                                </div>
+                                {localUser?.dingo_id && (
+                                    <div style={{ fontSize: 13, color: 'var(--primary)', fontWeight: 600 }}>
+                                        @{localUser.dingo_id}
+                                    </div>
+                                )}
+                                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                                    {localUser?.bio || 'No bio set'}
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                                    ID: {deviceId}
+                                </div>
+                            </div>
                         </div>
-                        <div className="settings-row">
-                            <span className="settings-label">Bio</span>
-                            <span className="settings-value">{localUser?.bio || 'Not set'}</span>
-                        </div>
+                    )}
+                </section>
+
+                {/* ── Appearance section ── */}
+                <section className="settings-section">
+                    <h3>Appearance</h3>
+                    <div style={{ marginBottom: 12, color: 'var(--text-secondary)', fontSize: 13 }}>
+                        Choose how Dingo looks on your device.
+                    </div>
+                    <div className="theme-options-grid">
+                        <button className={`theme-card ${theme === 'light' ? 'active' : ''}`} onClick={() => updateTheme('light')}>
+                            <div className="theme-card-preview light-preview">
+                                <span>☀️</span>
+                            </div>
+                            <span className="theme-card-label">Light</span>
+                        </button>
+                        <button className={`theme-card ${theme === 'dark' ? 'active' : ''}`} onClick={() => updateTheme('dark')}>
+                            <div className="theme-card-preview dark-preview">
+                                <span>🌙</span>
+                            </div>
+                            <span className="theme-card-label">Dark</span>
+                        </button>
+                        <button className={`theme-card ${theme === 'system' ? 'active' : ''}`} onClick={() => updateTheme('system')}>
+                            <div className="theme-card-preview system-preview">
+                                <span>💻</span>
+                            </div>
+                            <span className="theme-card-label">System</span>
+                        </button>
                     </div>
                 </section>
 
@@ -393,11 +746,11 @@ export default function SettingsPage() {
                     </div>
                     <div className="settings-row">
                         <span className="settings-label">Signaling Port</span>
-                        <span className="settings-value">45678 (UDP)</span>
+                        <span className="settings-value">{signalingPort || 45678} (UDP)</span>
                     </div>
                     <div className="settings-row">
                         <span className="settings-label">File Server Port</span>
-                        <span className="settings-value">18080 (HTTP)</span>
+                        <span className="settings-value">{fileServerPort || 18080} (HTTP)</span>
                     </div>
                 </section>
 
@@ -421,6 +774,21 @@ export default function SettingsPage() {
                     <div style={{ color: 'var(--success)', fontSize: 13, marginTop: 8 }}>
                         ✓ Settings saved
                     </div>
+                )}
+
+                {showCropper && (
+                    <AvatarCropperModal
+                        src={cropImageSrc}
+                        onApply={(croppedUrl) => {
+                            setEditAvatar(croppedUrl);
+                            setShowCropper(false);
+                            setCropImageSrc('');
+                        }}
+                        onCancel={() => {
+                            setShowCropper(false);
+                            setCropImageSrc('');
+                        }}
+                    />
                 )}
             </div>
         </div>

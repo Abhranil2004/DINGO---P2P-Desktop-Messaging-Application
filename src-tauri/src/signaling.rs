@@ -178,6 +178,8 @@ pub enum SignalingMessage {
         to: String,
         meeting_id: String,
         host_name: String,
+        #[serde(default)]
+        call_type: Option<String>,
     },
     /// Response to meeting invite (accept/decline)
     MeetingInviteResponse {
@@ -425,19 +427,27 @@ impl SignalingServer {
                                     if id != device_id {
                                         let mut peers_lock = peers.write().unwrap();
 
-                                        // If we already know this peer's address, DO NOT allow an incoming
-                                        // packet from a different source to overwrite it. This prevents
-                                        // a remote client from spoofing an existing peer id (for
-                                        // example: telling others that the host stopped sharing).
-                                        if let Some(existing) = peers_lock.get(&id) {
-                                            if existing.address != src {
-                                                // Possible spoofing attempt — ignore this message.
+                                        // Anti-spoofing: if we already know this peer, only allow
+                                        // messages from the same IP address.  We DO allow the port
+                                        // to change (e.g. peer restarted on a new ephemeral port or
+                                        // the OS assigned a different port). Dropping on IP mismatch
+                                        // still prevents cross-host impersonation.
+                                        if let Some(existing) = peers_lock.get_mut(&id) {
+                                            if existing.address.ip() != src.ip() {
+                                                // Different IP — likely a spoofing attempt, ignore.
                                                 println!(
-                                                    "[Signaling] Ignoring message for '{}' from {} (expected {})",
-                                                    id, src, existing.address
+                                                    "[Signaling] Ignoring message for '{}' from {} (expected IP {})",
+                                                    id, src, existing.address.ip()
                                                 );
-                                                // skip forwarding the message to the app
                                                 continue;
+                                            } else if existing.address.port() != src.port() {
+                                                // Same IP, different port — peer restarted / port change.
+                                                // Update the registered address so we can reply correctly.
+                                                println!(
+                                                    "[Signaling] Peer '{}' port changed {} → {} (updating)",
+                                                    id, existing.address, src
+                                                );
+                                                existing.address = src;
                                             }
                                         } else {
                                             // First time seeing this peer id — record address

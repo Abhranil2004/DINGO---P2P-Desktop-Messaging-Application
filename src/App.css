@@ -65,6 +65,26 @@
   --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
 }
 
+body.dark {
+  --bg: #0f172a;
+  --bg-secondary: #1e293b;
+  --bg-hover: #334155;
+  --bg-input: #1e293b;
+
+  --text: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #64748b;
+
+  --border: #334155;
+  --border-light: #1e293b;
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
+  --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.5), 0 1px 2px -1px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.5);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+}
+
 /* ── Reset & Base ──────────────────────────────────────────── */
 *,
 *::before,
@@ -72,6 +92,15 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+}
+
+/* Ensure all form elements inherit theme font and text color */
+input,
+textarea,
+select {
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg-input);
 }
 
 html,
@@ -86,7 +115,7 @@ body {
   font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-weight: 400;
   color: var(--text);
-  background: #f8fafc;
+  background: var(--bg-secondary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   line-height: 1.5;
@@ -822,6 +851,7 @@ body {
   border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--bg-input);
+  color: var(--text);
   font-size: 14px;
   outline: none;
   resize: none;
@@ -3384,4 +3414,260 @@ body {
 
 .mt-log-error .mt-log-msg {
   color: #fca5a5;
+}
+
+/* ─── Appearance / Theme Selector Styles ─────────────────────── */
+.theme-options-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.theme-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  width: 100%;
+}
+
+.theme-card:hover {
+  border-color: var(--primary-hover);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.theme-card.active {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+
+.theme-card-preview {
+  width: 100%;
+  height: 60px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  transition: all 0.2s ease;
+}
+
+.light-preview {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+
+.dark-preview {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+}
+
+.system-preview {
+  background: linear-gradient(135deg, #f1f5f9 50%, #0f172a 50%);
+  border: 1px solid var(--border);
+}
+
+.theme-card-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.theme-card.active .theme-card-label {
+  color: var(--primary);
+}
+
+/* ─── Global Calling Overlay ─────────────────────────────────── */
+.global-call-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.global-call-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  width: 320px;
+  padding: 40px 24px;
+  text-align: center;
+  box-shadow: var(--shadow-2xl);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.global-call-avatar-container {
+  position: relative;
+  width: 90px;
+  height: 90px;
+  margin-bottom: 24px;
+}
+
+.global-call-avatar-bg {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: var(--primary-bg);
+  border: 2px solid var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  z-index: 2;
+  position: relative;
+}
+
+.global-call-avatar-ring {
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  right: -10px;
+  bottom: -10px;
+  border-radius: 50%;
+  border: 2px solid var(--primary);
+  opacity: 0.4;
+  animation: pulseRing 1.8s infinite cubic-bezier(0.215, 0.61, 0.355, 1);
+  z-index: 1;
+}
+
+@keyframes pulseRing {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  100% { transform: scale(1.3); opacity: 0; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.global-call-peer-name {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 8px 0;
+}
+
+.global-call-status {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  margin: 0 0 32px 0;
+  letter-spacing: 0.5px;
+}
+
+.global-call-actions {
+  display: flex;
+  gap: 32px;
+  justify-content: center;
+}
+
+.global-call-btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.global-call-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+}
+
+.global-call-btn.decline {
+  background: #ef4444;
+}
+
+.global-call-btn.decline:hover {
+  background: #dc2626;
+}
+
+.global-call-btn.accept {
+  background: #10b981;
+}
+
+.global-call-btn.accept:hover {
+  background: #059669;
+}
+
+/* ─── Attachment Popover Menu ───────────────────────────────── */
+.attachment-popover-menu {
+  position: absolute;
+  bottom: 60px;
+  left: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 150px;
+  z-index: 1000;
+  animation: popoverFadeIn 0.15s ease-out;
+}
+
+@keyframes popoverFadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.popover-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.popover-item:hover {
+  background: var(--hover);
+  color: var(--primary);
+}
+
+.popover-item svg {
+  color: var(--text-muted);
+  transition: color 0.15s ease;
+}
+
+.popover-item:hover svg {
+  color: var(--primary);
+}
+
+.icon-btn.toggle-attach-btn.active {
+  color: var(--primary);
+  background: var(--primary-bg);
 }

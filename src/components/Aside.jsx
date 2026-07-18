@@ -18,7 +18,7 @@ export default function Aside() {
         <>
             <aside className="aside">
                 <div className="aside-logo">
-                   <img width={45} src="icon.png" alt="" />
+                   <img width={45} src="home icon.png" alt="" />
                 </div>
 
                 <nav className="aside_settings">
