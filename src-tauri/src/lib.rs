@@ -8,42 +8,51 @@ mod db;
 mod discovery;
 mod file_server;
 mod file_transfer;
+#[cfg(not(target_os = "android"))]
 mod screen_capture;
 mod signaling;
 mod tray;
 
 use commands::AppState;
+use std::path::PathBuf;
+use std::sync::OnceLock;
 use tauri::Manager;
-use tauri_plugin_autostart::MacosLauncher;
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub(crate) static APP_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+#[cfg(target_os = "android")]
+fn _start_app() {
+    tauri::android_binding!(com_dingo, app, run, tauri::wry);
+}
+
 pub fn run() {
     tauri::Builder::default()
         // Core plugins
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_autostart::init(
-            MacosLauncher::LaunchAgent,
-            Some(vec!["--minimized"]),
-        ))
         // App setup
         .setup(|app| {
             // Initialize app state
-            let state = AppState::new()
+            let app_data_dir = app.path().app_data_dir()
                 .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            let _ = APP_DATA_DIR.set(app_data_dir.clone());
+            let state = AppState::new_in(&app_data_dir)
+                .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            println!("Dingo initialized successfully");
+            println!("Database path: {:?}", state.paths.db_path);
             app.manage(state);
 
-            // Initialize system tray (must happen before window setup)
-            let handle = app.handle().clone();
-            if let Err(e) = tray::init_tray(&handle) {
-                // Tray initialization failure should not abort app startup in dev/hot-reload
-                println!("[Dingo] Warning: failed to initialize tray: {}", e);
+            // Initialize system tray (desktop only)
+            #[cfg(not(target_os = "android"))]
+            {
+                let handle = app.handle().clone();
+                if let Err(e) = tray::init_tray(&handle) {
+                    println!("[Dingo] Warning: failed to initialize tray: {}", e);
+                }
             }
 
             // Set up window close behavior (minimize to tray instead of closing)
-            // In dev/hot-reload situations the "main" window may not be available during setup.
-            // Be tolerant and skip the close handler if the window is absent instead of failing setup.
             if let Some(window) = app.get_webview_window("main") {
                 let window_clone = window.clone();
                 window.on_window_event(move |event| {
@@ -56,10 +65,6 @@ pub fn run() {
             } else {
                 println!("[Dingo] Warning: main window not available during setup; skipping close-handler registration");
             }
-
-            // Log initialization
-            println!("Dingo initialized successfully");
-            println!("Database path: {:?}", db::Database::get_db_path());
 
             Ok(())
         })
@@ -170,9 +175,12 @@ pub fn run() {
             // Register existing local avatar files with file server
             commands::register_local_avatar,
             commands::get_storage_stats,
-            // Screen capture commands
+            // Screen capture commands (desktop only)
+            #[cfg(not(target_os = "android"))]
             screen_capture::capture_screen_primary,
+            #[cfg(not(target_os = "android"))]
             screen_capture::capture_screen,
+            #[cfg(not(target_os = "android"))]
             screen_capture::list_displays,
         ])
         .run(tauri::generate_context!())

@@ -82,8 +82,16 @@ impl Database {
         app_dir.join("dingo.db")
     }
 
-    pub fn new() -> SqliteResult<Self> {
-        let conn = Connection::open(Self::get_db_path())?;
+    pub fn get_db_path_in(base: &PathBuf) -> PathBuf {
+        let instance = std::env::var("DINGO_INSTANCE").unwrap_or_default();
+        let app_name = if instance.is_empty() { "Dingo".to_string() } else { format!("Dingo_{}", instance) };
+        let app_dir = base.join(app_name);
+        std::fs::create_dir_all(&app_dir).ok();
+        app_dir.join("dingo.db")
+    }
+
+    pub fn new_in(base: &PathBuf) -> SqliteResult<Self> {
+        let conn = Connection::open(Self::get_db_path_in(base))?;
         let db = Database { conn: Mutex::new(conn) };
         db.run_migrations()?;
         Ok(db)
