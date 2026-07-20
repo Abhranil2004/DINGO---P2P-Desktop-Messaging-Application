@@ -1,219 +1,196 @@
-<p align="center">
-  <img src="https://github.com/Abhranil2004/DINGO---P2P-Desktop-Messaging-Application/blob/general/src-tauri/icons/Dingo.png" alt="Dingo Logo" width="200"/>
-</p>
-
-# DINGO  
-### Secure P2P Desktop Messaging Built with Rust + React
-
-![Tauri](https://img.shields.io/badge/Tauri-v2-orang)
-![React](https://img.shields.io/badge/React-19-61dafb)
-![Rust](https://img.shields.io/badge/Rust-stable-ce422b)
-![License](https://img.shields.io/badge/license-MIT-blue)
-
-> Fast. Secure. Lightweight.  
-> A modern peer-to-peer messaging experience — without centralized servers.
-
----
-
-## ✨ Why DINGO?
-
-DINGO is a secure, lightweight desktop messaging application that connects peers directly using LAN or WebRTC.
-
-No heavy Chromium bundling.  
-No cloud dependency required.  
-No unnecessary background services.  
-
-Built with **Tauri + Rust**, DINGO delivers native performance with modern UI.
+<div align="center">
+  <img src="public/dingo.svg" alt="Dingo Logo" width="80" height="80" />
+  <h1>Dingo</h1>
+  <p><strong>Secure P2P Desktop Messaging & File Sharing</strong></p>
+  <p>
+    <a href="https://github.com/SpreadSheets600/Dingo/actions">
+      <img src="https://img.shields.io/github/actions/workflow/status/SpreadSheets600/Dingo/ci.yml?branch=main&style=flat-square&label=CI" alt="CI Status" />
+    </a>
+    <a href="https://github.com/SpreadSheets600/Dingo/releases">
+      <img src="https://img.shields.io/github/v/release/SpreadSheets600/Dingo?style=flat-square" alt="Release" />
+    </a>
+    <a href="LICENSE">
+      <img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="MIT License" />
+    </a>
+    <img src="https://img.shields.io/badge/Tauri-v2-6C4BFF?style=flat-square&logo=tauri" alt="Tauri v2" />
+    <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react" alt="React 19" />
+    <img src="https://img.shields.io/badge/Rust-stable-EF4A23?style=flat-square&logo=rust" alt="Rust stable" />
+    <img src="https://img.shields.io/badge/E2E%20Encryption-Active-success?style=flat-square" alt="E2EE" />
+  </p>
+</div>
 
 ---
 
-## 🚀 Core Features
-
-### 🔐 End-to-End Encryption
-- X25519 key exchange
-- AES-GCM-256 message encryption
-- Secure peer sessions
-
-### 💬 Real-Time Messaging
-- Instant delivery
-- Read receipts
-- Offline message sync
-
-### 📁 File Transfer
-- Chunked file sending
-- Resume support
-- Automatic download handling
-
-### 📺 Screen Sharing
-- Native Rust screen capture
-- Optimized streaming
-
-### 🔍 LAN Discovery
-- Auto peer detection
-- Zero manual configuration
-
-### 👥 Group Chat
-- Multi-user messaging
-- Group member management
-
-### 📝 Notes & Productivity
-- Save notes locally
-- Pin important messages
+**Dingo** is a peer-to-peer desktop messaging and file-sharing application built with Rust and React. It enables direct, encrypted communication between devices on the same local network — no central server, no accounts, no cloud dependency.
 
 ---
 
-## 🖥 Screenshots
+## Features
 
-<p align="center">
-  <img src="https://github.com/Abhranil2004/DINGO---P2P-Desktop-Messaging-Application/blob/general/src-tauri/Screenshorts/1.png" width="600"/>
-</p>
+- **End-to-End Encryption** — X25519 key exchange + AES-GCM-256 per-message encryption
+- **Real-Time Messaging** — Instant text messaging over LAN with UDP discovery
+- **File Sharing** — Chunked file transfer with resume support over HTTP
+- **Screen Capture** — Share your screen directly using native Rust screen capture
+- **LAN Discovery** — Automatic peer discovery via UDP broadcast
+- **Group Chat** — Create group conversations with multiple peers
+- **Notes** — Built-in note-taking with search and pinning
+- **Offline Delivery** — Messages are queued and delivered when peers come online
+- **Cross-Platform** — Windows, macOS, and Linux (desktop); Android support via Tauri mobile
+- **No Account Required** — Privacy-first, no sign-ups, no servers
 
-<p align="center">
-  <img src="https://github.com/Abhranil2004/DINGO---P2P-Desktop-Messaging-Application/blob/general/src-tauri/Screenshorts/2.png" width="600"/>
-</p>
----
-## 🏗 Architecture
+## Screenshots
 
-```
-┌───────────────────────────┐
-│        React UI           │
-│  • Components             │
-│  • State Management       │
-│  • WebRTC Client          │
-└──────────────┬────────────┘
-               │ IPC Bridge
-┌──────────────┴────────────┐
-│        Tauri Core         │
-└──────────────┬────────────┘
-               │
-┌──────────────┴────────────┐
-│        Rust Backend       │
-│  • Encryption Engine      │
-│  • SQLite Database        │
-│  • File Transfer          │
-│  • Screen Capture         │
-│  • Peer Discovery         │
-└───────────────────────────┘
-```
+<div align="center">
+  <img src="src-tauri/screenshots/1.png" alt="Dingo Chat Interface" width="400" style="border-radius: 8px;" />
+  <img src="src-tauri/screenshots/2.png" alt="Dingo Chat with Messages" width="400" style="border-radius: 8px;" />
+</div>
 
----
+## Tech Stack
 
-## ⚙ Technology Stack
+| Layer | Technology |
+|-------|-----------|
+| **Frontend** | React 19, React Router 7, Vite 7 |
+| **Backend** | Rust, Tauri v2 |
+| **Database** | SQLite via rusqlite |
+| **Encryption** | x25519-dalek (X25519), aes-gcm (AES-256-GCM) |
+| **Networking** | UDP (LAN discovery), HTTP (file transfer), WebSocket (relay) |
+| **Mobile** | Tauri Android bindings |
 
-| Layer           | Technology       |
-| --------------- | ---------------- |
-| UI              | React 19         |
-| Build Tool      | Vite             |
-| Desktop Runtime | Tauri v2         |
-| Backend         | Rust             |
-| Database        | SQLite           |
-| Encryption      | AES-GCM + X25519 |
-| Networking      | WebRTC + HTTP    |
+## Installation
 
----
+### Prerequisites
 
-## 🛠 Installation Guide
+- **Node.js** 18+ (with pnpm: `npm install -g pnpm`)
+- **Rust** stable (install via [rustup](https://rustup.rs))
+- **System dependencies**:
+  - **Windows**: [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) + WebView2 (preinstalled on Windows 10+)
+  - **macOS**: Xcode Command Line Tools (`xcode-select --install`)
+  - **Linux**: `libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf`
 
-### 1️⃣ Install Requirements
-
-* Node.js (18+)
-* Rust (stable)
-* pnpm
-* Microsoft C++ Build Tools (Windows)
-* WebView2 Runtime
-
----
-
-### 2️⃣ Clone Repository
+### Quick Start
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/dingo.git
-cd dingo
-```
+# Clone the repository
+git clone https://github.com/SpreadSheets600/Dingo.git
+cd Dingo
 
----
-
-### 3️⃣ Install Dependencies
-
-```bash
+# Install dependencies
 pnpm install
-```
 
----
-
-### 4️⃣ Run Development Mode
-
-```bash
+# Run in development mode
 pnpm tauri dev
 ```
 
----
+The app will launch with hot-reload enabled. The frontend dev server runs on `http://localhost:1420`.
 
-## 📦 Build Production EXE
+## Building
+
+### Desktop Builds
 
 ```bash
+# Build for the current platform
 pnpm tauri build
 ```
 
-Windows output:
+Output artifacts:
+- **Windows**: `src-tauri/target/release/bundle/nsis/Dingo_1.0.0_x64-setup.exe`
+- **macOS**: `src-tauri/target/release/bundle/dmg/Dingo_1.0.0_x64.dmg`
+- **Linux**: `src-tauri/target/release/bundle/appimage/Dingo_1.0.0_x64.AppImage`
 
+### Android Build
+
+```bash
+# Build native libraries for Android
+cd src-tauri
+cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 build --release
+
+# Copy frontend assets
+cp -r ../dist/* gen/android/app/src/main/assets/
+
+# Build APK
+cd gen/android
+./gradlew assembleRelease
 ```
-src-tauri/target/release/bundle/nsis/
+
+### Build All (Windows + Android)
+
+```powershell
+# PowerShell (Windows)
+.\build-all.ps1
+
+# Bash (macOS/Linux/Git Bash)
+./build-all.sh
 ```
 
----
+### WebSocket Relay Server
 
-## 📁 Project Structure
+The relay server enables cross-network connectivity. Deploy separately:
+
+```bash
+cd relay-server
+npm install
+node server.js
+```
+
+Default port: `8080` (configurable via `PORT` env var).
+
+## Project Structure
 
 ```
 dingo/
-├── src/                 # React frontend
-├── src-tauri/           # Rust backend
-├── public/
-├── dist/
-├── package.json
-└── README.md
+├── src/                          # React frontend
+│   ├── components/               # UI components
+│   ├── context/                  # React context providers
+│   ├── hooks/                    # Custom React hooks
+│   ├── lib/                      # Tauri IPC wrappers, WebSocket client
+│   └── pages/                    # Route pages (chat, meetings, notes, settings)
+├── src-tauri/                    # Rust backend
+│   ├── src/
+│   │   ├── commands.rs           # 70+ IPC command handlers
+│   │   ├── crypto.rs             # X25519 + AES-GCM encryption
+│   │   ├── db.rs                 # SQLite database layer
+│   │   ├── discovery.rs          # LAN UDP peer discovery
+│   │   ├── file_server.rs        # HTTP file sharing server
+│   │   ├── file_transfer.rs      # Chunked file transfer
+│   │   ├── lib.rs                # Tauri app entry point
+│   │   ├── screen_capture.rs     # Native screen capture
+│   │   ├── signaling.rs          # UDP signaling server
+│   │   └── tray.rs               # System tray integration
+│   ├── icons/                    # Application icons
+│   └── tauri.conf.json           # Tauri configuration
+├── relay-server/                 # WebSocket relay server (Node.js)
+├── build-all.sh                  # Cross-platform build script
+└── build-all.ps1                 # Windows build script
 ```
 
----
+## Configuration
 
-## 🔐 Security Design
+### Environment Variables
 
-* Zero centralized server required
-* Peer-to-peer encrypted sessions
-* Local SQLite storage
-* No message logging on third-party services
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | Relay server port | `8080` |
+| `TAURI_DEV_HOST` | Vite dev server host | `localhost` |
+| `DINGO_INSTANCE` | Multi-instance discriminator (for testing) | — |
+| `ANDROID_HOME` | Android SDK path | `~/Android/Sdk` |
+| `ANDROID_NDK_HOME` | Android NDK path | auto-detected |
 
----
+## Contributing
 
-## 🧪 Development Commands
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Run `cargo test` to verify Rust tests
+5. Commit your changes (`git commit -m 'Add amazing feature'`)
+6. Push to the branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
 
-```bash
-pnpm tauri dev
-pnpm tauri build
-pnpm tauri info
-```
+## License
 
-If EXE is locked:
-
-```powershell
-taskkill /F /IM dingo.exe
-```
-
----
-
-## 🚀 Roadmap
-
-* [ ] Voice & Video Calls
-* [ ] Cross-platform release (macOS/Linux)
-* [ ] Message search
-* [ ] Emoji reactions
-* [ ] Dark mode themes
-* [ ] Cloud relay server option
+Distributed under the MIT License. See `LICENSE` for more information.
 
 ---
 
-## 👨‍💻 Creator
-
-**Abhranil Dutta**
-
+<div align="center">
+  <p>Built with ❤️ by <a href="https://github.com/Abhranil2004">Abhranil Dutta</a></p>
+</div>

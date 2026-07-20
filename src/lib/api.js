@@ -249,6 +249,54 @@ export const generateUuid = () =>
 export const getTimestamp = () =>
   invoke("get_timestamp");
 
+// ================= NOTES =================
+export const getAllNotes = () =>
+  invoke("get_all_notes");
+
+export const saveNote = (note) =>
+  invoke("save_note", { input: note });
+
+export const deleteNote = (id) =>
+  invoke("delete_note", { id });
+
+export const toggleNotePin = (id) =>
+  invoke("toggle_note_pin", { id });
+
+// ================= GROUPS =================
+export const getGroups = () =>
+  invoke("get_groups");
+
+export const createGroup = (name, memberIds, memberNames) =>
+  invoke("create_group", { input: { name, member_ids: memberIds, member_names: memberNames } });
+
+export const deleteGroup = (groupId) =>
+  invoke("delete_group", { groupId });
+
+export const leaveGroup = (groupId) =>
+  invoke("leave_group", { groupId });
+
+export const addGroupMember = (groupId, userId, username) =>
+  invoke("add_group_member", { groupId, userId, username });
+
+export const removeGroupMember = (groupId, userId) =>
+  invoke("remove_group_member", { groupId, userId });
+
+export const getGroupMessages = (groupId, limit = 100) =>
+  invoke("get_group_messages", { groupId, limit });
+
+export const getGroupMembers = (groupId) =>
+  invoke("get_group_members", { groupId });
+
+export const sendGroupMessage = (groupId, content, messageType = "text") =>
+  invoke("send_group_message", { input: { group_id: groupId, content, message_type: messageType } });
+
+// ================= AVATAR CACHE =================
+export const downloadAndCacheAvatar = (deviceId, remoteUrl, fileName) =>
+  invoke("download_and_cache_avatar", { deviceId, remoteUrl, hint_name: fileName });
+
+export const registerLocalAvatar = (deviceId, filePath) =>
+  invoke("register_local_avatar", { deviceId, filePath });
+
 // Disabled safely (backend command missing)
 export const appendDevLog = () => Promise.resolve();
 

@@ -105,6 +105,14 @@ impl FileTransferManager {
         }
     }
 
+    pub fn new_with_downloads_dir(downloads_dir: &PathBuf) -> Self {
+        fs::create_dir_all(downloads_dir).ok();
+        FileTransferManager {
+            transfers: Arc::new(RwLock::new(HashMap::new())),
+            downloads_dir: downloads_dir.clone(),
+        }
+    }
+
     /// Get the downloads directory
     pub fn get_downloads_dir(&self) -> PathBuf {
         self.downloads_dir.clone()
