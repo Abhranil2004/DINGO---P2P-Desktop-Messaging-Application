@@ -36,7 +36,7 @@ network-interface = "2"
 # Encryption
 aes-gcm = "0.10"
 rand = "0.8"
-x25519-dalek = { version = "2", features = ["static_secrets"] }
+x25519-dalek = { version = "3", features = ["static_secrets"] }
 sha2 = "0.10"
 
 # WebRTC signaling
