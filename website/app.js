@@ -16,12 +16,14 @@ function initTheme() {
   const icon = toggleBtn.querySelector('.theme-icon');
   
   const savedTheme = localStorage.getItem('dingo_web_theme') || 'dark';
+  document.documentElement.className = savedTheme;
   document.body.className = savedTheme;
   icon.textContent = savedTheme === 'dark' ? '☀️' : '🌙';
 
   toggleBtn.addEventListener('click', () => {
-    const isDark = document.body.classList.contains('dark');
+    const isDark = document.body.classList.contains('dark') || document.documentElement.classList.contains('dark');
     const newTheme = isDark ? 'light' : 'dark';
+    document.documentElement.className = newTheme;
     document.body.className = newTheme;
     icon.textContent = newTheme === 'dark' ? '☀️' : '🌙';
     localStorage.setItem('dingo_web_theme', newTheme);

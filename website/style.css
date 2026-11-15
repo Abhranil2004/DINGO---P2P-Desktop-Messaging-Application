@@ -42,6 +42,8 @@
   --radius-pill: 999px;
 }
 
+:root.dark,
+html.dark,
 body.dark {
   --bg: #0d0e15;
   --bg-card: #151622;
@@ -70,16 +72,20 @@ body.dark {
   padding: 0;
 }
 
+html, body {
+  background-color: var(--bg);
+  color: var(--text);
+}
+
 html {
   scroll-behavior: smooth;
   font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
-  background-color: var(--bg);
-  color: var(--text);
 }
 
 body {
   position: relative;
   min-height: 100vh;
+  background-color: var(--bg);
   background-image: var(--grid-pattern);
   background-size: var(--grid-size);
   background-attachment: fixed;
@@ -877,6 +883,21 @@ body.dark .step-num {
   color: #12131a;
   text-align: center;
   box-shadow: var(--shadow-lg);
+}
+
+body.dark .cta-card {
+  background: var(--bg-card);
+  color: var(--text);
+  border: var(--border-width) solid var(--primary);
+  box-shadow: var(--shadow-purple);
+}
+
+body.dark .cta-title {
+  color: var(--text);
+}
+
+body.dark .cta-subtitle {
+  color: var(--text-secondary);
 }
 
 .cta-title {
