@@ -131,15 +131,53 @@
     </div>
   </section>
 
-  <!-- Interactive Live P2P Demo Simulator -->
+  <!-- Interactive Live P2P Demo Simulator & Desktop App Showcase -->
   <section class="section-container" id="interactive-demo">
     <div class="section-header">
-      <div class="badge-pill">INTERACTIVE SIMULATION</div>
-      <h2 class="section-title">TEST THE P2P ENGINE IN ACTION</h2>
-      <p class="section-desc">Experience how Dingo sends direct packets without routing through cloud storage.</p>
+      <div class="badge-pill">APP PREVIEW & SIMULATOR</div>
+      <h2 class="section-title">SEE DINGO IN ACTION</h2>
+      <p class="section-desc">Experience the native desktop interface and test real-time P2P data streaming.</p>
+
+      <!-- Switcher Tabs -->
+      <div class="showcase-tabs">
+        <button class="showcase-tab-btn active" id="tab-btn-screenshot" type="button">
+          📸 Native Desktop App
+        </button>
+        <button class="showcase-tab-btn" id="tab-btn-interactive" type="button">
+          ⚡ Interactive Simulator
+        </button>
+      </div>
     </div>
 
-    <div class="demo-window brutalist-card">
+    <!-- View 1: Real Native Desktop App Showcase -->
+    <div class="app-showcase-window brutalist-card" id="screenshot-view">
+      <div class="window-bar">
+        <div class="window-dots">
+          <span class="dot red"></span>
+          <span class="dot yellow"></span>
+          <span class="dot green"></span>
+        </div>
+        <div class="window-title">DINGO Desktop — Direct P2P Channel (Windows x64)</div>
+        <div class="window-mode">LIVE RUNNING APPLICATION</div>
+      </div>
+      <div class="screenshot-display-wrap">
+        <img src="assets/dingo-app-screenshot.png" alt="DINGO P2P Desktop Application Interface" class="app-screenshot-main" onerror="this.onerror=null;this.src='dingo-app-screenshot.png';">
+        <div class="screenshot-callout-pill pill-tl">📁 Direct P2P File Transfer (5.5 MB)</div>
+        <div class="screenshot-callout-pill pill-tr">⚡ 0.2ms WebRTC Speed</div>
+        <div class="screenshot-callout-pill pill-bl">🔒 Zero Cloud Storage</div>
+        <div class="screenshot-callout-pill pill-br">👤 Instant @handle Discovery</div>
+      </div>
+      <div class="screenshot-footer-bar">
+        <span class="footer-meta-item">🟢 <strong>Direct Peer Connected:</strong> USER (Online)</span>
+        <span class="footer-meta-divider">•</span>
+        <span class="footer-meta-item">📦 <strong>File Delivery:</strong> Dingo_1.0.1_x64-setup.exe transferred direct device-to-device</span>
+        <span class="footer-meta-divider">•</span>
+        <a href="#download" class="screenshot-action-link">Download Setup (.exe) →</a>
+      </div>
+    </div>
+
+    <!-- View 2: Interactive Live P2P Simulator -->
+    <div class="demo-window brutalist-card" id="interactive-view" style="display: none;">
       <div class="window-bar">
         <div class="window-dots">
           <span class="dot red"></span>

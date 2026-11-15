@@ -5,10 +5,35 @@
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
   initCopySha();
+  initShowcaseTabs();
   initInteractiveChat();
   initFlightCanvas();
   initConfettiDownload();
 });
+
+// ── Showcase Tabs (App Screenshot vs Interactive Simulator) ────
+function initShowcaseTabs() {
+  const btnScreenshot = document.getElementById('tab-btn-screenshot');
+  const btnInteractive = document.getElementById('tab-btn-interactive');
+  const viewScreenshot = document.getElementById('screenshot-view');
+  const viewInteractive = document.getElementById('interactive-view');
+
+  if (!btnScreenshot || !btnInteractive) return;
+
+  btnScreenshot.addEventListener('click', () => {
+    btnScreenshot.classList.add('active');
+    btnInteractive.classList.remove('active');
+    if (viewScreenshot) viewScreenshot.style.display = 'block';
+    if (viewInteractive) viewInteractive.style.display = 'none';
+  });
+
+  btnInteractive.addEventListener('click', () => {
+    btnInteractive.classList.add('active');
+    btnScreenshot.classList.remove('active');
+    if (viewScreenshot) viewScreenshot.style.display = 'none';
+    if (viewInteractive) viewInteractive.style.display = 'block';
+  });
+}
 
 // ── 1. Theme Switcher (Light / Dark) ───────────────────────────
 function initTheme() {
