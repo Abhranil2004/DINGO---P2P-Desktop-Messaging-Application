@@ -62,6 +62,7 @@ export default function ChatPage() {
     const [screenshotData, setScreenshotData] = useState(null);
     const [showSharedMedia, setShowSharedMedia] = useState(false);
     const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+    const attachMenuRef = useRef(null);
     const [sharedMediaList, setSharedMediaList] = useState([]);
     const [sharedMediaTab, setSharedMediaTab] = useState('images'); // 'images' | 'files'
 
@@ -97,6 +98,18 @@ export default function ChatPage() {
         const unsub = p2pManager.subscribe((state) => setP2pState(state));
         return unsub;
     }, []);
+
+    // Close attachment popover when clicking outside
+    useEffect(() => {
+        if (!showAttachmentMenu) return;
+        const handleClickOutside = (e) => {
+            if (attachMenuRef.current && !attachMenuRef.current.contains(e.target)) {
+                setShowAttachmentMenu(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [showAttachmentMenu]);
 
     // Periodically check global Dingo presence for WAN / Long-Distance peers
     useEffect(() => {
@@ -2038,35 +2051,37 @@ export default function ChatPage() {
                         </div>
                     )}
 
-                    <div className="chat-input-bar" style={{ position: 'relative' }}>
-                        <button
-                            className={`icon-btn toggle-attach-btn ${showAttachmentMenu ? 'active' : ''}`}
-                            title="Attach options"
-                            onClick={() => setShowAttachmentMenu(!showAttachmentMenu)}
-                        >
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transition: 'transform 0.2s', transform: showAttachmentMenu ? 'rotate(45deg)' : 'none' }}>
-                                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-                            </svg>
-                        </button>
+                    <div className="chat-input-bar">
+                        <div ref={attachMenuRef} style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                            <button
+                                className={`icon-btn toggle-attach-btn ${showAttachmentMenu ? 'active' : ''}`}
+                                title="Attach options"
+                                onClick={() => setShowAttachmentMenu(prev => !prev)}
+                            >
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transition: 'transform 0.2s', transform: showAttachmentMenu ? 'rotate(45deg)' : 'none' }}>
+                                    <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+                                </svg>
+                            </button>
 
-                        {showAttachmentMenu && (
-                            <div className="attachment-popover-menu">
-                                <button className="popover-item" onClick={() => { setShowSharedMedia(true); setShowAttachmentMenu(false); }}>
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                                        <circle cx="8.5" cy="8.5" r="1.5" />
-                                        <polyline points="21 15 16 10 5 21" />
-                                    </svg>
-                                    <span>Shared Media</span>
-                                </button>
-                                <button className="popover-item" onClick={() => { fileInputRef.current?.click(); setShowAttachmentMenu(false); }}>
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                                    </svg>
-                                    <span>Attach File</span>
-                                </button>
-                            </div>
-                        )}
+                            {showAttachmentMenu && (
+                                <div className="attachment-popover-menu">
+                                    <button className="popover-item" onClick={() => { setShowSharedMedia(true); setShowAttachmentMenu(false); }}>
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                                            <circle cx="8.5" cy="8.5" r="1.5" />
+                                            <polyline points="21 15 16 10 5 21" />
+                                        </svg>
+                                        <span>Shared Media</span>
+                                    </button>
+                                    <button className="popover-item" onClick={() => { fileInputRef.current?.click(); setShowAttachmentMenu(false); }}>
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                                        </svg>
+                                        <span>Attach File</span>
+                                    </button>
+                                </div>
+                            )}
+                        </div>
 
                         <input
                             className="chat-input"
