@@ -1128,8 +1128,10 @@ export default function ChatPage() {
             || activePeer.avatar_path;
     }, [activePeer?.device_id, peers, allUsers]);
 
+    const hasActiveChat = activePeer || activeGroup;
+
     return (
-        <div className="chat-page">
+        <div className={`chat-page ${hasActiveChat ? 'chat-active' : ''}`}>
             {/* ─── Sidebar ─────────────────────────────────── */}
             <div className="chat-sidebar">
                 <div className="chat-sidebar-header">
@@ -1345,6 +1347,9 @@ export default function ChatPage() {
                 /* ── Group Chat View ── */
                 <div className="chat-main">
                     <div className="chat-header">
+                        <button className="mobile-back" onClick={() => setActiveGroup(null)} aria-label="Back">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6" /></svg>
+                        </button>
                         <div className="chat-header-left" onClick={() => setShowGroupInfo(true)}>
                             <div className="group-avatar-sm" style={{ background: activeGroup.avatar_color || '#4f46e5' }}>
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
@@ -1553,6 +1558,9 @@ export default function ChatPage() {
                     onDrop={handleDrop}
                 >
                     <div className="chat-header">
+                        <button className="mobile-back" onClick={() => chat.selectPeer(null)} aria-label="Back">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6" /></svg>
+                        </button>
                         <div className="chat-header-left" onClick={() => setShowProfile(activePeer)}>
                             <UserAvatar name={displayActivePeerName} size={34} avatarUrl={displayActivePeerAvatar} />
                             <div>

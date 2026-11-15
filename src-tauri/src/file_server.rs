@@ -24,6 +24,7 @@ pub struct StoredFile {
 }
 
 impl FileServer {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         let storage_dir = dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -35,6 +36,15 @@ impl FileServer {
             files: Arc::new(RwLock::new(HashMap::new())),
             port: Arc::new(RwLock::new(0)),
             storage_dir,
+        }
+    }
+
+    pub fn new_with_storage_dir(storage_dir: &PathBuf) -> Self {
+        fs::create_dir_all(storage_dir).ok();
+        FileServer {
+            files: Arc::new(RwLock::new(HashMap::new())),
+            port: Arc::new(RwLock::new(0)),
+            storage_dir: storage_dir.clone(),
         }
     }
 

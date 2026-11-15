@@ -23,6 +23,54 @@ use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
+/// Centralized app data paths — resolved once, used everywhere.
+pub struct AppPaths {
+    pub db_path: PathBuf,
+    pub downloads_dir: PathBuf,
+    pub shared_files_dir: PathBuf,
+    pub avatars_dir: PathBuf,
+    pub base_dir: PathBuf,
+}
+
+impl AppPaths {
+    pub fn new(base: &PathBuf) -> Self {
+        let instance = std::env::var("DINGO_INSTANCE").unwrap_or_default();
+        let app_dir = if instance.is_empty() {
+            base.join("Dingo")
+        } else {
+            base.join(format!("Dingo_{}", instance))
+        };
+
+        let downloads_dir = {
+            #[cfg(target_os = "android")]
+            {
+                app_dir.join("downloads")
+            }
+            #[cfg(not(target_os = "android"))]
+            {
+                dirs::download_dir()
+                    .unwrap_or_else(|| app_dir.join("downloads"))
+                    .join(&app_dir.file_name().unwrap().to_string_lossy().to_string())
+            }
+        };
+
+        Self {
+            db_path: app_dir.join("dingo.db"),
+            downloads_dir,
+            shared_files_dir: app_dir.join("shared_files"),
+            avatars_dir: app_dir.join("avatars"),
+            base_dir: app_dir,
+        }
+    }
+
+    pub fn ensure_dirs(&self) {
+        std::fs::create_dir_all(&self.base_dir).ok();
+        std::fs::create_dir_all(&self.downloads_dir).ok();
+        std::fs::create_dir_all(&self.shared_files_dir).ok();
+        std::fs::create_dir_all(&self.avatars_dir).ok();
+    }
+}
+
 /// App state containing all managers
 pub struct AppState {
     pub db: Arc<Database>,
@@ -32,11 +80,16 @@ pub struct AppState {
     pub file_transfer: Arc<FileTransferManager>,
     pub file_server: Arc<FileServer>,
     pub device_id: String,
+    pub paths: AppPaths,
 }
 
 impl AppState {
-    pub fn new() -> Result<Self, String> {
-        let db = Database::new().map_err(|e| e.to_string())?;
+    pub fn new_in(base: &PathBuf) -> Result<Self, String> {
+        let paths = AppPaths::new(base);
+        Self::from_parts(Database::new_in(base).map_err(|e| e.to_string())?, paths)
+    }
+
+    fn from_parts(db: Database, paths: AppPaths) -> Result<Self, String> {
 
         let device_id = match db.get_setting("device_id") {
             Ok(Some(id)) if !id.is_empty() => {
@@ -58,14 +111,17 @@ impl AppState {
             }
         };
 
+        paths.ensure_dirs();
+
         Ok(AppState {
             db: Arc::new(db),
             discovery: Arc::new(DiscoveryManager::new()),
             crypto: Arc::new(CryptoManager::new()),
             signaling: Arc::new(SignalingServer::new(device_id.clone())),
-            file_transfer: Arc::new(FileTransferManager::new()),
-            file_server: Arc::new(FileServer::new()),
+            file_transfer: Arc::new(FileTransferManager::new_with_downloads_dir(&paths.downloads_dir)),
+            file_server: Arc::new(FileServer::new_with_storage_dir(&paths.shared_files_dir)),
             device_id,
+            paths,
         })
     }
 }
@@ -85,16 +141,17 @@ fn dev_log(msg: &str) {
     let last_write = LAST_DEV_LOG_WRITE.get_or_init(|| AtomicU64::new(0));
     let prev = last_write.load(Ordering::Relaxed);
     if ts.saturating_sub(prev) >= 1 {
-        // safe to write to file — place log in the app data directory (same place as DB)
         last_write.store(ts, Ordering::Relaxed);
-        // Determine a stable app-local location to avoid touching the source tree and
-        // triggering dev rebuilds when the log file changes.
-        let log_dir = Database::get_db_path()
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("."));
+        let log_dir = crate::APP_DATA_DIR
+            .get()
+            .cloned()
+            .unwrap_or_else(|| {
+                Database::get_db_path()
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| PathBuf::from("."))
+            });
         let log_path = log_dir.join("dingo_dev_log.txt");
-        // Ensure directory exists
         let _ = std::fs::create_dir_all(&log_dir);
         if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(log_path) {
             let _ = writeln!(f, "{}", s);
@@ -181,12 +238,8 @@ pub fn init_app(state: State<AppState>) -> Result<InitResult, String> {
     Ok(InitResult {
         device_id: state.device_id.clone(),
         public_key,
-        db_path: Database::get_db_path().to_string_lossy().to_string(),
-        downloads_path: state
-            .file_transfer
-            .get_downloads_dir()
-            .to_string_lossy()
-            .to_string(),
+        db_path: state.paths.db_path.to_string_lossy().to_string(),
+        downloads_path: state.paths.downloads_dir.to_string_lossy().to_string(),
     })
 }
 
@@ -1191,22 +1244,8 @@ pub fn download_and_cache_avatar(
         return Err("device_id and remote_url required".to_string());
     }
 
-    // Create avatars directory: Documents/Dingo/avatars/
-    // Uses standard Windows/Mac/Linux locations
-    let avatars_path = if cfg!(target_os = "windows") {
-        let docs = std::env::var("USERPROFILE")
-            .map(|p| std::path::PathBuf::from(p).join("Documents"))
-            .unwrap_or_else(|_| std::path::PathBuf::from("."));
-        docs.join("Dingo").join("avatars")
-    } else if cfg!(target_os = "macos") {
-        let home = std::env::var("HOME").unwrap_or_default();
-        std::path::PathBuf::from(home).join("Documents/Dingo/avatars")
-    } else {
-        let home = std::env::var("HOME").unwrap_or_default();
-        std::path::PathBuf::from(home).join(".local/share/Dingo/avatars")
-    };
-
-    std::fs::create_dir_all(&avatars_path)
+    let avatars_path = &state.paths.avatars_dir;
+    std::fs::create_dir_all(avatars_path)
         .map_err(|e| format!("Failed to create avatars dir: {}", e))?;
 
     // Generate stable filename: user_<device_id>.png
@@ -1592,10 +1631,15 @@ pub fn get_file_server_port(state: State<AppState>) -> u16 {
 /// This bypasses the HTTP file server entirely for faster, direct file access
 #[tauri::command]
 pub fn read_file_as_data_url(file_id: String) -> Result<String, String> {
-    let storage_dir = dirs::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("Dingo")
-        .join("shared_files");
+    let storage_dir = crate::APP_DATA_DIR
+        .get()
+        .map(|base| base.join("Dingo").join("shared_files"))
+        .unwrap_or_else(|| {
+            dirs::data_local_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("Dingo")
+                .join("shared_files")
+        });
 
     // Find file matching the ID prefix
     if let Ok(entries) = std::fs::read_dir(&storage_dir) {
@@ -1975,6 +2019,10 @@ pub fn open_file_location(path: String) -> Result<(), String> {
             .spawn()
             .map_err(|e| e.to_string())?;
     }
+    #[cfg(target_os = "android")]
+    {
+        println!("[Dingo] open_file_location called on Android (path={}), no-op", path);
+    }
 
     Ok(())
 }
@@ -2131,14 +2179,14 @@ fn dir_size(path: &std::path::Path) -> u64 {
 
 #[tauri::command]
 pub fn get_storage_stats(state: State<AppState>) -> StorageStats {
-    let db_path = Database::get_db_path();
-    let db_size = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
+    let db_path = &state.paths.db_path;
+    let db_size = std::fs::metadata(db_path).map(|m| m.len()).unwrap_or(0);
 
-    let shared_files_path = state.file_server.get_storage_dir();
-    let shared_files_size = dir_size(&shared_files_path);
+    let shared_files_path = &state.paths.shared_files_dir;
+    let shared_files_size = dir_size(shared_files_path);
 
-    let downloads_path = state.file_transfer.get_downloads_dir();
-    let downloads_size = dir_size(&downloads_path);
+    let downloads_path = &state.paths.downloads_dir;
+    let downloads_size = dir_size(downloads_path);
 
     let total_size = db_size + shared_files_size + downloads_size;
 

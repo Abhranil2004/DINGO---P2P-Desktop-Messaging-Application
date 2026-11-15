@@ -221,9 +221,14 @@ export function useApp() {
                 api.appendDevLog && api.appendDevLog('[Dingo] startSignaling returned port=' + actualSignalingPort).catch(() => { });
 
                 // Start discovery — pass the actual signaling port so peers can reach us
+                // Gracefully handles mobile where UDP broadcast is blocked
                 const username = user?.username || 'Dingo User';
-                await api.startDiscovery(username, actualSignalingPort);
-                api.appendDevLog && api.appendDevLog('[Dingo] startDiscovery returned').catch(() => { });
+                try {
+                    await api.startDiscovery(username, actualSignalingPort);
+                    api.appendDevLog && api.appendDevLog('[Dingo] startDiscovery returned').catch(() => { });
+                } catch (discErr) {
+                    console.warn('[Dingo] LAN discovery unavailable (expected on mobile):', discErr);
+                }
 
                 // Get file server port
                 try {
