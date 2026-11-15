@@ -1,11 +1,8 @@
 // src/lib/relay.js
 // Dingo Relay Client — WebSocket connection to the relay server
-// Enables finding users and sending messages across different networks/internet
+// Enables finding users and chatting across different networks/internet (WAN / Long-Distance)
 
 // ─── Configuration ────────────────────────────────────────────
-// Set VITE_RELAY_URL in .env or .env.local to override, e.g.:
-//   VITE_RELAY_URL=wss://your-relay.railway.app
-// Falls back to the default public relay.
 const DEFAULT_RELAY = import.meta.env.VITE_RELAY_URL || 'wss://dingo-relay.up.railway.app';
 
 const RECONNECT_BASE_MS = 3000;
@@ -20,12 +17,19 @@ class DingoRelayClient {
     this.myDingoId  = null;
     this.myUsername = null;
 
+    // Load persisted remote mode preference (default false until enabled in Settings)
+    const savedMode = typeof localStorage !== 'undefined' ? localStorage.getItem('dingo_remote_mode') : null;
+    this.enabled = savedMode === 'true';
+
+    this.serverUrl = (typeof localStorage !== 'undefined' && localStorage.getItem('dingo_relay_url')) || DEFAULT_RELAY;
+    this.status = this.enabled ? 'disconnected' : 'disabled';
     this.connected = false;
     this._destroyed = false;
 
     // Event listeners
     this._signalingListeners = []; // for relayed signaling messages
     this._msgListeners = [];       // for raw relay server messages (find/found/etc.)
+    this._statusListeners = [];    // for status change callbacks
 
     this._reconnectTimer = null;
     this._pingTimer = null;
@@ -35,34 +39,112 @@ class DingoRelayClient {
     this._findCallbacks = new Map();
   }
 
+  _notifyStatus() {
+    const detail = {
+      enabled: this.enabled,
+      connected: this.connected,
+      status: this.status,
+      serverUrl: this.serverUrl,
+    };
+    this._statusListeners.forEach(fn => { try { fn(detail); } catch {} });
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('dingo:relay-status', { detail }));
+    }
+  }
+
+  // ─── Enable / Disable Long-Distance Mode ───────────────────
+  enable(deviceId, dingoId, username) {
+    this.enabled = true;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('dingo_remote_mode', 'true');
+    }
+    if (deviceId) this.myDeviceId = deviceId;
+    if (dingoId !== undefined) this.myDingoId = dingoId;
+    if (username !== undefined) this.myUsername = username;
+
+    this.connect(this.myDeviceId, this.myDingoId, this.myUsername);
+  }
+
+  disable() {
+    this.enabled = false;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('dingo_remote_mode', 'false');
+    }
+    clearTimeout(this._reconnectTimer);
+    clearInterval(this._pingTimer);
+    if (this.ws) {
+      try { this.ws.close(); } catch {}
+      this.ws = null;
+    }
+    this.connected = false;
+    this.status = 'disabled';
+    this._notifyStatus();
+  }
+
+  setRelayUrl(url) {
+    const cleanUrl = (url || '').trim() || DEFAULT_RELAY;
+    this.serverUrl = cleanUrl;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('dingo_relay_url', cleanUrl);
+    }
+    if (this.enabled) {
+      clearTimeout(this._reconnectTimer);
+      if (this.ws) {
+        try { this.ws.close(); } catch {}
+        this.ws = null;
+      }
+      this.connected = false;
+      this._openSocket();
+    }
+  }
+
   // ─── Connect ──────────────────────────────────────────────
   connect(deviceId, dingoId, username) {
     if (this._destroyed) return;
-    this.myDeviceId = deviceId;
-    this.myDingoId  = dingoId;
-    this.myUsername = username;
+    if (!this.enabled) {
+      this.status = 'disabled';
+      this._notifyStatus();
+      return;
+    }
+
+    if (deviceId) this.myDeviceId = deviceId;
+    if (dingoId !== undefined) this.myDingoId = dingoId;
+    if (username !== undefined) this.myUsername = username;
 
     this._openSocket();
   }
 
   _openSocket() {
-    if (this._destroyed) return;
+    if (this._destroyed || !this.enabled) return;
+
+    clearTimeout(this._reconnectTimer);
+    this.status = 'connecting';
+    this._notifyStatus();
 
     try {
-      this.ws = new WebSocket(DEFAULT_RELAY);
+      this.ws = new WebSocket(this.serverUrl);
     } catch (e) {
       console.warn('[relay] Cannot open WebSocket:', e.message);
+      this.status = 'disconnected';
+      this._notifyStatus();
       this._scheduleReconnect();
       return;
     }
 
     this.ws.onopen = () => {
-      console.log('[relay] Connected to relay server');
+      console.log('[relay] Connected to relay server:', this.serverUrl);
       this.connected = true;
+      this.status = 'connected';
       this._reconnectDelay = RECONNECT_BASE_MS;
+      this._notifyStatus();
 
       // Register ourselves
-      this._send({ type: 'register', deviceId: this.myDeviceId, dingoId: this.myDingoId, username: this.myUsername });
+      this._send({
+        type: 'register',
+        deviceId: this.myDeviceId,
+        dingoId: this.myDingoId,
+        username: this.myUsername
+      });
 
       // Keep-alive ping
       clearInterval(this._pingTimer);
@@ -81,18 +163,26 @@ class DingoRelayClient {
     this.ws.onclose = () => {
       this.connected = false;
       clearInterval(this._pingTimer);
-      if (!this._destroyed) {
+      if (this.enabled && !this._destroyed) {
+        this.status = 'disconnected';
+        this._notifyStatus();
         console.log(`[relay] Disconnected — reconnecting in ${this._reconnectDelay}ms`);
         this._scheduleReconnect();
+      } else {
+        this.status = 'disabled';
+        this._notifyStatus();
       }
     };
 
     this.ws.onerror = (e) => {
       console.warn('[relay] WebSocket error:', e?.message || e);
+      this.status = 'disconnected';
+      this._notifyStatus();
     };
   }
 
   _scheduleReconnect() {
+    if (!this.enabled || this._destroyed) return;
     clearTimeout(this._reconnectTimer);
     this._reconnectTimer = setTimeout(() => {
       this._reconnectDelay = Math.min(this._reconnectDelay * 1.5, RECONNECT_MAX_MS);
@@ -109,29 +199,50 @@ class DingoRelayClient {
       if (sigMsg.type === 'ChatMessage') {
         const messageId = sigMsg.id;
         const senderId = sigMsg.from;
-        const senderName = sigMsg.sender_name || 'User';
+        const senderName = sigMsg.sender_name || 'Remote User';
         const content = sigMsg.content;
         const messageType = sigMsg.message_type || 'text';
-        const createdAt = sigMsg.timestamp;
+        const createdAt = sigMsg.timestamp || Date.now();
 
         // Dynamic import to avoid circular dependency
-        import('./api').then(api => {
-          api.storeIncomingMessage(messageId, senderId, senderName, content, messageType, createdAt)
-            .then(savedMsg => {
-              // Dispatch to chat message listeners
-              window.dispatchEvent(new CustomEvent('dingo:chat-message-received', { detail: savedMsg }));
-              
-              // Automatically send DeliveryAck back to sender
-              this.relay(senderId, {
-                type: 'DeliveryAck',
-                from: this.myDeviceId,
-                to: senderId,
-                message_id: messageId
-              });
-            })
-            .catch(err => {
-              console.error('[relay] Failed to store incoming message:', err);
+        import('./api').then(async (api) => {
+          try {
+            // Upsert the remote peer in the local database so they are recognized
+            await api.upsertPeerUser(senderId, senderName, null, sigMsg.sender_dingo_id || null);
+
+            // If a file was sent over long distance with its dataUrl, store it locally so it displays cleanly
+            if (sigMsg.dataUrl && content) {
+              try {
+                const fileInfo = JSON.parse(content);
+                if (fileInfo.fileId) {
+                  await api.storeSharedFile(fileInfo.fileId, sigMsg.dataUrl, fileInfo.fileName || 'file');
+                  window.dispatchEvent(new CustomEvent('dingo:file-downloaded', {
+                    detail: { fileId: fileInfo.fileId, dataUrl: sigMsg.dataUrl }
+                  }));
+                }
+              } catch (fileErr) {
+                console.warn('[relay] Storing relayed file failed:', fileErr);
+              }
+            }
+
+            // Save incoming message
+            const savedMsg = await api.storeIncomingMessage(messageId, senderId, senderName, content, messageType, createdAt);
+            
+            // Dispatch to chat message listeners with _viaRelay indicator
+            window.dispatchEvent(new CustomEvent('dingo:chat-message-received', {
+              detail: { ...(savedMsg || { id: messageId, peer_id: senderId, sender_id: senderId, content, message_type: messageType, created_at: createdAt }), _viaRelay: true }
+            }));
+            
+            // Automatically send DeliveryAck back to sender
+            this.relay(senderId, {
+              type: 'DeliveryAck',
+              from: this.myDeviceId,
+              to: senderId,
+              message_id: messageId
             });
+          } catch (err) {
+            console.error('[relay] Failed to store incoming message:', err);
+          }
         });
       } else {
         // Dispatch to standard signaling listeners
@@ -177,13 +288,16 @@ class DingoRelayClient {
    */
   findUser(handle, timeout = 8000) {
     return new Promise((resolve, reject) => {
+      if (!this.enabled) {
+        return reject(new Error('Long-Distance Mode is disabled in Settings.'));
+      }
       if (!this.connected) {
-        return reject(new Error('Relay not connected'));
+        return reject(new Error('Relay server not connected. Check your internet connection.'));
       }
       const key = handle.toLowerCase().replace(/^@/, '');
       const timer = setTimeout(() => {
         this._findCallbacks.delete(key);
-        reject(new Error(`Timeout searching for "@${key}"`));
+        reject(new Error(`Timeout searching for "@${key}" on long-distance network`));
       }, timeout);
 
       this._findCallbacks.set(key, { resolve, reject, timer });
@@ -194,17 +308,15 @@ class DingoRelayClient {
   /**
    * Relay a signaling or chat message to another user via the relay server.
    * @param {string} toDeviceId  Recipient's device ID
-   * @param {object} payload     The message payload (same shape as local signaling messages)
+   * @param {object} payload     The message payload
    */
   relay(toDeviceId, payload) {
+    if (!this.enabled) return false;
     return this._send({ type: 'relay', to: toDeviceId, payload });
   }
 
   /**
    * Register a handler for relayed signaling messages.
-   * Works the same as api.onSignalingMessage.
-   * @param {function} fn  Called with (message, fromDeviceId)
-   * @returns {function} Unsubscribe function
    */
   onSignalingMessage(fn) {
     this._signalingListeners.push(fn);
@@ -215,8 +327,6 @@ class DingoRelayClient {
 
   /**
    * Register a handler for raw server messages.
-   * @param {function} fn
-   * @returns {function} Unsubscribe function
    */
   onMessage(fn) {
     this._msgListeners.push(fn);
@@ -226,18 +336,43 @@ class DingoRelayClient {
   }
 
   /**
-   * Update local user profile on relay (e.g. after username change)
+   * Subscribe to relay status changes.
+   */
+  onStatusChange(fn) {
+    this._statusListeners.push(fn);
+    fn({
+      enabled: this.enabled,
+      connected: this.connected,
+      status: this.status,
+      serverUrl: this.serverUrl,
+    });
+    return () => {
+      this._statusListeners = this._statusListeners.filter(l => l !== fn);
+    };
+  }
+
+  /**
+   * Update local user profile on relay
    */
   updateProfile(dingoId, username) {
     this.myDingoId  = dingoId;
     this.myUsername = username;
-    if (this.connected && this.myDeviceId) {
+    if (this.enabled && this.connected && this.myDeviceId) {
       this._send({ type: 'register', deviceId: this.myDeviceId, dingoId, username });
     }
   }
 
   /** Whether currently connected to the relay server */
-  get isConnected() { return this.connected; }
+  get isConnected() { return this.enabled && this.connected; }
+
+  getStatus() {
+    return {
+      enabled: this.enabled,
+      connected: this.connected,
+      status: this.status,
+      serverUrl: this.serverUrl,
+    };
+  }
 
   /** Disconnect permanently */
   destroy() {
@@ -249,6 +384,8 @@ class DingoRelayClient {
       this.ws = null;
     }
     this.connected = false;
+    this.status = 'disabled';
+    this._notifyStatus();
   }
 }
 

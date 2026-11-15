@@ -6,6 +6,7 @@ import { useAppContext } from '../context/AppContext';
 import * as api from '../lib/api';
 import * as chatLogger from '../lib/chatLogger';
 import UserAvatar from '../components/UserAvatar';
+import LongDistanceP2PSection from '../components/LongDistanceP2PSection';
 
 function AvatarCropperModal({ src, onApply, onCancel }) {
     const [zoom, setZoom] = useState(1);
@@ -737,6 +738,9 @@ export default function SettingsPage() {
                     </div>
                 </section>
 
+                {/* ── Long-Distance (Internet) Direct P2P Section ── */}
+                <LongDistanceP2PSection />
+
                 {/* ── Network section ── */}
                 <section className="settings-section">
                     <h3>Network</h3>
@@ -759,14 +763,14 @@ export default function SettingsPage() {
                     <h3>About</h3>
                     <div className="settings-row">
                         <span className="settings-label">Version</span>
-                        <span className="settings-value">1.0.0</span>
+                        <span className="settings-value">1.0.1</span>
                     </div>
                     <div className="settings-row">
                         <span className="settings-label">Encryption</span>
                         <span className="settings-value">X25519 + AES-256-GCM</span>
                     </div>
                     <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12 }}>
-                        Pingo — Secure LAN Communication
+                        Dingo — P2P Desktop Messaging Application
                     </p>
                 </section>
 

@@ -7,7 +7,7 @@ import * as avatarCache from '../lib/avatarCache';
 import * as chatLogger from '../lib/chatLogger';
 import { compressDataUrlIfNeeded } from '../lib/avatarUtils';
 import { initNotifications, showMessageNotification, getLastNotification, clearNotificationHistory } from '../lib/notifications';
-import relay from '../lib/relay';
+import p2pManager from '../lib/p2p/p2pManager';
 
 // ═══════════════════════════════════════════════════════════════
 //  useApp  —  top-level app state
@@ -302,16 +302,6 @@ export function useApp() {
                 clearTimeout(wb);
                 api.appendDevLog && api.appendDevLog('[Dingo] bootstrap complete').catch(() => { });
 
-                // ── Connect to relay server for internet P2P ──────────
-                // This runs after init so we have deviceId, dingoId, username
-                try {
-                    const dingoId = user?.dingo_id || '';
-                    const uname   = user?.username || 'Dingo User';
-                    relay.connect(init.device_id, dingoId, uname);
-                    console.log('[Dingo] Relay client connecting...');
-                } catch (relayErr) {
-                    console.warn('[Dingo] Relay connect failed (non-fatal):', relayErr);
-                }
             } catch (err) {
                 console.error('[Dingo] Init failed:', err);
                 api.appendDevLog && api.appendDevLog('[Dingo] init failed: ' + String(err)).catch(() => { });
@@ -842,9 +832,6 @@ export function useApp() {
         );
         if (updated) {
             setLocalUser(updated);
-            try {
-                relay.updateProfile(updated.dingo_id || '', updated.username || '');
-            } catch (err) { /* ignore */ }
         }
 
         // *** CRITICAL: Broadcast profile update to ALL peers immediately ***
@@ -1025,6 +1012,16 @@ export function useApp() {
         }
     }, [theme, applyTheme]);
 
+    // ─── Long-Distance P2P State & Controls ────────
+    const [p2pInfo, setP2pInfo] = useState(p2pManager.getState());
+
+    useEffect(() => {
+        const unsub = p2pManager.subscribe((info) => {
+            setP2pInfo(info);
+        });
+        return unsub;
+    }, []);
+
     return {
         localUser, deviceId, peers, allUsers, initialized, error,
         unreadCounts, lastMessages, fileServerPort, signalingPort,
@@ -1033,6 +1030,7 @@ export function useApp() {
         setLocalUser, setActiveChatPeerId, peerMapRef,
         theme, updateTheme,
         incomingCall, setIncomingCall,
+        p2pInfo, p2pManager,
     };
 }
 
@@ -1165,27 +1163,23 @@ export function useChat() {
             setMessages(prev => [...prev, msg]);
             chatLogger.log('send', `Message saved: ${msg.id.slice(0, 8)}…`, { messageId: msg.id, peerId });
             
-            // 1. Try UDP signaling
+            // 1. Try UDP signaling (Local LAN)
             try {
                 await api.relayChatMessage(peerId, msg.id, text, 'text', senderName || '');
                 chatLogger.log('relay', `Relay attempted: ${msg.id.slice(0, 8)}… → ${peerId.slice(0, 8)}…`, { messageId: msg.id, peerId });
             } catch (e) {
                 chatLogger.log('error', `Relay failed: ${msg.id.slice(0, 8)}… → ${peerId.slice(0, 8)}…`, { messageId: msg.id, peerId, error: String(e) });
-                console.warn('Local relay failed, trying WebSocket relay:', e);
+                console.warn('Local relay failed, trying P2P DataChannel:', e);
             }
 
-            // 2. Try WebSocket relay (Internet route)
-            if (relay.isConnected) {
-                relay.relay(peerId, {
-                    type: 'ChatMessage',
-                    id: msg.id,
-                    content: text,
-                    message_type: 'text',
-                    sender_name: senderName || '',
-                    timestamp: msg.created_at,
-                    from: deviceIdRef.current
-                });
-                chatLogger.log('relay', `WebSocket relay sent: ${msg.id.slice(0, 8)}…`, { messageId: msg.id, peerId });
+            // 2. Direct P2P WebRTC DataChannel (Internet P2P — Zero Cloud Storage)
+            if (p2pManager.status === 'connected') {
+                try {
+                    p2pManager.sendDirectMessage(msg.id, deviceIdRef.current, senderName || '', text);
+                    chatLogger.log('send', `Direct P2P DataChannel message sent: ${msg.id.slice(0, 8)}…`, { messageId: msg.id, peerId });
+                } catch (e) {
+                    console.warn('Direct P2P send failed:', e);
+                }
             }
         } else {
             chatLogger.log('error', `Failed to save message to DB`, { peerId });
@@ -1216,27 +1210,25 @@ export function useChat() {
                 }]);
                 chatLogger.log('send', `File message saved: ${msg.id.slice(0, 8)}…`, { messageId: msg.id, fileId, fileName });
                 
-                // 1. Try UDP signaling
+                // 1. Try UDP signaling (Local LAN)
                 try {
                     await api.relayChatMessage(peerId, msg.id, fileInfo, messageType, senderName || '');
                     chatLogger.log('relay', `File relay attempted: ${msg.id.slice(0, 8)}…`, { messageId: msg.id, peerId });
                 } catch (e) {
                     chatLogger.log('error', `File relay failed: ${msg.id.slice(0, 8)}…`, { messageId: msg.id, peerId, error: String(e) });
-                    console.warn('Local file relay failed, trying WebSocket relay:', e);
+                    console.warn('Local file relay failed, trying P2P DataChannel:', e);
                 }
 
-                // 2. Try WebSocket relay (Internet route)
-                if (relay.isConnected) {
-                    relay.relay(peerId, {
-                        type: 'ChatMessage',
-                        id: msg.id,
-                        content: fileInfo,
-                        message_type: messageType,
-                        sender_name: senderName || '',
-                        timestamp: msg.created_at,
-                        from: deviceIdRef.current
-                    });
-                    chatLogger.log('relay', `WebSocket file relay sent: ${msg.id.slice(0, 8)}…`, { messageId: msg.id, peerId });
+                // 2. Direct P2P WebRTC DataChannel (Chunked binary transfer with SHA-256 integrity)
+                if (p2pManager.status === 'connected') {
+                    try {
+                        const blob = await fetch(dataUrl).then(r => r.blob());
+                        const file = new File([blob], fileName, { type: messageType });
+                        p2pManager.sendDirectFile(fileId, file, deviceIdRef.current, senderName || '');
+                        chatLogger.log('send', `Direct P2P DataChannel file sent: ${fileId}…`, { fileId, fileName });
+                    } catch (e) {
+                        console.warn('Direct P2P DataChannel file send failed:', e);
+                    }
                 }
             }
             return msg;

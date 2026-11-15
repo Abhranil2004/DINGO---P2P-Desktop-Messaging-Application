@@ -130,16 +130,7 @@ export const registerPeer = (peerId, ip, port) =>
   invoke("register_peer", { peerId, ip, port });
 
 export const sendSignalingMessage = (peerId, message) => {
-  const p2pPromise = invoke("send_signaling_message", { peerId, message });
-
-  // Parallel delivery via WebSocket relay for internet peers
-  import('./relay').then(({ relay }) => {
-    if (relay && relay.isConnected) {
-      relay.relay(peerId, message);
-    }
-  }).catch(() => {});
-
-  return p2pPromise;
+  return invoke("send_signaling_message", { peerId, message });
 };
 
 // ================= ENCRYPTION =================

@@ -1,0 +1,20 @@
+{
+  "name": "dingo-signaling",
+  "version": "1.0.0",
+  "description": "Zero-knowledge ephemeral WebRTC signaling server for Dingo P2P using Cloudflare Workers and Durable Objects",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest run"
+  },
+  "keywords": ["webrtc", "signaling", "cloudflare-workers", "durable-objects", "p2p"],
+  "author": "Abhranil Dutta",
+  "license": "MIT",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241112.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4",
+    "wrangler": "^3.86.0"
+  }
+}

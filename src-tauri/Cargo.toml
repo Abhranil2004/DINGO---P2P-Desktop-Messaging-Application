@@ -1,6 +1,6 @@
 [package]
 name = "dingo"
-version = "1.0.0"
+version = "1.0.1"
 description = "Dingo - P2P Desktop Messaging App"
 authors = ["Abhranil Dutta"]
 edition = "2021"

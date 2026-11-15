@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dingo---p2p-desktop-messaging-application",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-11-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SIGNALING_ROOM",
+        "class_name": "SignalingRoom"
+      },
+      {
+        "name": "PRESENCE_REGISTRY",
+        "class_name": "PresenceRegistry"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["SignalingRoom", "PresenceRegistry"]
+    }
+  ],
+  "observability": {
+    "enabled": false
+  }
+}

@@ -3,9 +3,9 @@
 import React, { useEffect, useState } from 'react';
 
 const COLORS = [
-    '#4f46e5', '#7c3aed', '#db2777', '#ea580c',
-    '#0891b2', '#059669', '#d97706', '#dc2626',
-    '#2563eb', '#7e22ce', '#c026d3', '#0d9488',
+    '#7059e2', '#c6f135', '#ff70a6', '#00e5ff',
+    '#ffd128', '#ff6d3a', '#00e676', '#e040fb',
+    '#6c5ce7', '#ff4081', '#05d9e8', '#ff9f1c',
 ];
 
 function hashCode(str) {
@@ -122,6 +122,8 @@ export default function UserAvatar({ name, size = 40, className = '', style = {}
 
     const fontSize = size * 0.42;
 
+    const textColor = (color === '#c6f135' || color === '#ffd128') ? '#1a1a2e' : '#ffffff';
+
     // Render image only when we have a data URL or the image has already loaded
     if (avatarUrl && (isDataUrl || imgStatus === 'loaded')) {
         return (
@@ -131,7 +133,7 @@ export default function UserAvatar({ name, size = 40, className = '', style = {}
                 width={size}
                 height={size}
                 className={className}
-                style={{ borderRadius: '50%', objectFit: 'cover', flexShrink: 0, ...style }}
+                style={{ borderRadius: '8px', border: '2px solid #1a1a2e', objectFit: 'cover', flexShrink: 0, boxShadow: '2px 2px 0 #1a1a2e', ...style }}
                 onError={(e) => { e.target.style.display = 'none'; }}
             />
         );
@@ -142,11 +144,11 @@ export default function UserAvatar({ name, size = 40, className = '', style = {}
         return (
             <div
                 className={className}
-                style={{ width: size, height: size, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: color, ...style }}
+                style={{ width: size, height: size, borderRadius: '8px', border: '2px solid #1a1a2e', boxShadow: '2px 2px 0 #1a1a2e', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: color, ...style }}
                 aria-hidden="true"
             >
                 <svg width={size * 0.5} height={size * 0.5} viewBox="0 0 50 50" style={{ animation: 'spin 1s linear infinite' }}>
-                    <circle cx="25" cy="25" r="20" stroke="rgba(255,255,255,0.9)" strokeWidth="4" strokeLinecap="round" fill="none" strokeDasharray="80" strokeDashoffset="60" />
+                    <circle cx="25" cy="25" r="20" stroke="#1a1a2e" strokeWidth="4" strokeLinecap="round" fill="none" strokeDasharray="80" strokeDashoffset="60" />
                 </svg>
                 <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
             </div>
@@ -161,12 +163,12 @@ export default function UserAvatar({ name, size = 40, className = '', style = {}
                 height={size}
                 viewBox="0 0 40 40"
                 className={className}
-                style={{ borderRadius: '50%', flexShrink: 0, ...style }}
+                style={{ borderRadius: '8px', border: '2px solid #1a1a2e', boxShadow: '2px 2px 0 #1a1a2e', flexShrink: 0, ...style }}
                 aria-hidden="true"
             >
-                <circle cx="20" cy="20" r="20" fill={color} />
-                <circle cx="20" cy="15" r="7" fill="rgba(255,255,255,.85)" />
-                <ellipse cx="20" cy="33" rx="12" ry="10" fill="rgba(255,255,255,.85)" />
+                <rect x="0" y="0" width="40" height="40" rx="6" fill={color} />
+                <circle cx="20" cy="15" r="7" fill={textColor} opacity="0.9" />
+                <ellipse cx="20" cy="33" rx="12" ry="10" fill={textColor} opacity="0.9" />
             </svg>
         );
     }
@@ -177,19 +179,20 @@ export default function UserAvatar({ name, size = 40, className = '', style = {}
             height={size}
             viewBox="0 0 40 40"
             className={className}
-            style={{ borderRadius: '50%', flexShrink: 0, ...style }}
+            style={{ borderRadius: '8px', border: '2px solid #1a1a2e', boxShadow: '2px 2px 0 #1a1a2e', flexShrink: 0, ...style }}
             aria-label={name}
         >
-            <circle cx="20" cy="20" r="20" fill={color} />
+            <rect x="0" y="0" width="40" height="40" rx="6" fill={color} />
             <text
                 x="20"
-                y="20"
+                y="21"
                 textAnchor="middle"
                 dominantBaseline="central"
-                fill="#fff"
+                fill={textColor}
                 fontSize={fontSize}
-                fontWeight="600"
+                fontWeight="900"
                 fontFamily="Outfit, sans-serif"
+                letterSpacing="0.5px"
             >
                 {initials}
             </text>

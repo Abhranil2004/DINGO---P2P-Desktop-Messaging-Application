@@ -1,0 +1,3 @@
+# Optional server secret for HMAC signing of temporary invitation tokens
+# If omitted, a randomly generated runtime secret is used.
+INVITATION_SECRET=your_secret_key_minimum_32_characters_long_for_hmac
