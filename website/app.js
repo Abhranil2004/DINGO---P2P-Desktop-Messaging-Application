@@ -238,8 +238,6 @@ function initConfettiDownload() {
   // Local vs Remote fallback detection
   if (window.location.protocol === 'file:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
     downloadBtn.setAttribute('href', 'Dingo_1.0.1_x64-setup.exe');
-    const portableBtn = document.querySelector('.btn-hero-portable');
-    if (portableBtn) portableBtn.setAttribute('href', 'Dingo.exe');
   }
 
   downloadBtn.addEventListener('click', (e) => {

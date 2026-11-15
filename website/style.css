@@ -353,9 +353,9 @@ body.dark .highlight-lime {
 }
 
 .btn-hero-dl {
-  flex: 1;
-  min-width: 280px;
-  padding: 16px 24px;
+  width: 100%;
+  justify-content: center;
+  padding: 18px 24px;
   text-align: left;
 }
 
