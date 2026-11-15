@@ -104,14 +104,26 @@ export default function ChatPage() {
     const handleSearchDingoId = useCallback(async (queryId) => {
         const handle = queryId.trim().replace(/^@/, '').toLowerCase();
         if (!handle) return;
+
+        // Prevent self-search
+        const myDingoId = (localUser?.dingo_id || '').toLowerCase();
+        const myUsername = (localUser?.username || '').toLowerCase();
+        if (handle === myDingoId || handle === myUsername) {
+            showToast("That is your own Dingo ID! Please enter a friend's Dingo ID to chat with them.", 'info');
+            setIsSearchingDingo(false);
+            return;
+        }
+
         setIsSearchingDingo(true);
 
-        // 1. Search local user database — match by dingo_id OR username
+        // 1. Search local user database — excluding yourself
         try {
             const all = await api.getAllUsers();
             const localMatch = all.find(u =>
-                (u.dingo_id && u.dingo_id !== '' && u.dingo_id.toLowerCase() === handle) ||
-                u.username?.toLowerCase() === handle
+                u.id !== deviceId &&
+                u.username?.toLowerCase() !== myUsername &&
+                ((u.dingo_id && u.dingo_id !== '' && u.dingo_id.toLowerCase() === handle) ||
+                 u.username?.toLowerCase() === handle)
             );
             if (localMatch) {
                 const peerObj = { device_id: localMatch.device_id || localMatch.id, ...localMatch };
@@ -127,10 +139,11 @@ export default function ChatPage() {
             console.error('Local database query failed:', e);
         }
 
-        // 2. Also search live network peers (mDNS-discovered, may not be in DB yet)
+        // 2. Also search live network peers (mDNS-discovered, excluding yourself)
         const liveMatch = (peers || []).find(p =>
-            p.username?.toLowerCase() === handle ||
-            p.device_id?.toLowerCase() === handle
+            p.device_id !== deviceId &&
+            p.username?.toLowerCase() !== myUsername &&
+            (p.username?.toLowerCase() === handle || p.device_id?.toLowerCase() === handle)
         );
         if (liveMatch) {
             chat.selectPeer(liveMatch);
@@ -1358,9 +1371,6 @@ export default function ChatPage() {
                 /* ── Group Chat View ── */
                 <div className="chat-main">
                     <div className="chat-header">
-                        <button className="mobile-back" onClick={() => setActiveGroup(null)} aria-label="Back">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6" /></svg>
-                        </button>
                         <div className="chat-header-left" onClick={() => setShowGroupInfo(true)}>
                             <div className="group-avatar-sm" style={{ background: activeGroup.avatar_color || '#4f46e5' }}>
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
@@ -1569,9 +1579,6 @@ export default function ChatPage() {
                     onDrop={handleDrop}
                 >
                     <div className="chat-header">
-                        <button className="mobile-back" onClick={() => chat.selectPeer(null)} aria-label="Back">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="15 18 9 12 15 6" /></svg>
-                        </button>
                         <div className="chat-header-left" onClick={() => setShowProfile(activePeer)}>
                             <UserAvatar name={displayActivePeerName} size={34} avatarUrl={displayActivePeerAvatar} />
                             <div>
@@ -1600,6 +1607,22 @@ export default function ChatPage() {
 
                     <div className="chat-messages">
                         {chat.loading && <div className="empty-state-sm">Loading messages…</div>}
+                        {!chat.loading && chat.messages.length === 0 && (
+                            <div className="chat-empty" style={{ margin: 'auto', background: 'transparent' }}>
+                                <div className="chat-empty-inner" style={{ background: 'var(--bg)', border: '2px solid var(--border)', borderRadius: 'var(--radius)', padding: '28px 24px' }}>
+                                    <UserAvatar name={displayActivePeerName} size={60} avatarUrl={displayActivePeerAvatar} />
+                                    <h3 style={{ marginTop: 12, marginBottom: 4 }}>{displayActivePeerName}</h3>
+                                    {activePeer?.dingo_id && (
+                                        <div style={{ color: 'var(--primary)', fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
+                                            @{activePeer.dingo_id}
+                                        </div>
+                                    )}
+                                    <p style={{ margin: 0, fontSize: 13 }}>
+                                        Direct P2P conversation. Send a message to start chatting!
+                                    </p>
+                                </div>
+                            </div>
+                        )}
                         {chat.messages.map(msg => {
                             const isMine = msg.sender_id === deviceId;
                             const senderIp = !isMine ? peerIpMap[msg.sender_id] : '127.0.0.1';
