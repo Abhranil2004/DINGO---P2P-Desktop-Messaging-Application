@@ -9,8 +9,10 @@ export default function Profile({ isOpen, onClose, peer }) {
     const { localUser, updateProfile, saveAvatar } = useAppContext();
     const [editing, setEditing] = useState(false);
     const [username, setUsername] = useState('');
+    const [dingoId, setDingoId] = useState('');
     const [bio, setBio] = useState('');
     const [designation, setDesignation] = useState('');
+    const [copied, setCopied] = useState(false);
     const fileRef = useRef(null);
 
     // If peer is provided, show their profile read-only; otherwise show local profile
@@ -19,14 +21,28 @@ export default function Profile({ isOpen, onClose, peer }) {
 
     const startEdit = () => {
         setUsername(localUser?.username || '');
+        setDingoId(localUser?.dingo_id || '');
         setBio(localUser?.bio || '');
         setDesignation(localUser?.designation || '');
         setEditing(true);
     };
 
     const handleSave = async () => {
-        await updateProfile({ username, bio, designation });
+        const cleanedDingoId = dingoId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+        await updateProfile({
+            username: username.trim(),
+            dingo_id: cleanedDingoId,
+            bio: bio.trim(),
+            designation: designation.trim()
+        });
         setEditing(false);
+    };
+
+    const copyHandle = (handle) => {
+        if (!handle) return;
+        navigator.clipboard?.writeText?.(`@${handle}`);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
     };
 
     const handleAvatarChange = useCallback(async (e) => {
@@ -77,6 +93,22 @@ export default function Profile({ isOpen, onClose, peer }) {
                                 <input value={username} onChange={e => setUsername(e.target.value)} maxLength={30} autoFocus />
                             </label>
                             <label>
+                                <span>Dingo ID (Handle)</span>
+                                <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg)', border: '2px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px 8px' }}>
+                                    <span style={{ fontWeight: 800, color: 'var(--primary)', marginRight: 4 }}>@</span>
+                                    <input
+                                        value={dingoId}
+                                        onChange={e => setDingoId(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))}
+                                        placeholder="e.g. alex_01"
+                                        maxLength={24}
+                                        style={{ border: 'none', background: 'transparent', outline: 'none', width: '100%', color: 'var(--text)', fontSize: 14 }}
+                                    />
+                                </div>
+                                <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                                    Lowercase letters, numbers, underscores, and hyphens. Friends can find you with this handle.
+                                </span>
+                            </label>
+                            <label>
                                 <span>Bio</span>
                                 <textarea value={bio} onChange={e => setBio(e.target.value)} rows={3} maxLength={200} />
                             </label>
@@ -95,6 +127,27 @@ export default function Profile({ isOpen, onClose, peer }) {
                                 <span className="profile-label">Name</span>
                                 <span className="profile-value">{user.username}</span>
                             </div>
+
+                            <div className="profile-info-row">
+                                <span className="profile-label">Dingo ID</span>
+                                {user.dingo_id ? (
+                                    <span className="profile-value" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <span style={{ color: 'var(--primary)', fontWeight: 800 }}>@{user.dingo_id}</span>
+                                        <button
+                                            className="btn-sm btn-secondary"
+                                            onClick={() => copyHandle(user.dingo_id)}
+                                            style={{ padding: '2px 8px', fontSize: 10, cursor: 'pointer' }}
+                                        >
+                                            {copied ? '✓ Copied' : 'Copy'}
+                                        </button>
+                                    </span>
+                                ) : (
+                                    <span className="profile-value" style={{ fontStyle: 'italic', color: 'var(--text-muted)', fontSize: 12 }}>
+                                        {isLocal ? 'No Dingo ID (Handle) set yet' : 'No Dingo ID set for this contact'}
+                                    </span>
+                                )}
+                            </div>
+
                             {user.bio && (
                                 <div className="profile-info-row">
                                     <span className="profile-label">Bio</span>

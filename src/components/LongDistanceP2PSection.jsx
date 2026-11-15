@@ -32,15 +32,20 @@ export default function LongDistanceP2PSection() {
     }
   };
 
+  const hasDingoId = Boolean(localUser?.dingo_id);
+  const dingoHandle = localUser?.dingo_id || '';
+
   const copyHandle = () => {
-    const handle = `@${localUser?.dingo_id || localUser?.username || ''}`;
+    if (!hasDingoId) {
+      showToast('Please set your Dingo ID in Profile first!');
+      return;
+    }
+    const handle = `@${dingoHandle}`;
     navigator.clipboard.writeText(handle);
     setCopied(true);
     showToast('Copied Dingo ID to clipboard!');
     setTimeout(() => setCopied(false), 2000);
   };
-
-  const dingoHandle = localUser?.dingo_id || localUser?.username || '';
 
   return (
     <section className="settings-section" style={{ position: 'relative' }}>
@@ -126,9 +131,15 @@ export default function LongDistanceP2PSection() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ color: 'var(--text-secondary)' }}>Your Dingo ID:</span>
-            <strong style={{ color: 'var(--text)', fontFamily: 'monospace', fontSize: 14 }}>
-              @{dingoHandle}
-            </strong>
+            {hasDingoId ? (
+              <strong style={{ color: 'var(--primary)', fontFamily: 'monospace', fontSize: 14 }}>
+                @{dingoHandle}
+              </strong>
+            ) : (
+              <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 12 }}>
+                No Dingo ID (Handle) set yet — set it in Profile
+              </span>
+            )}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>

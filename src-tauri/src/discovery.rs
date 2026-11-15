@@ -20,6 +20,8 @@ pub struct PeerInfo {
     pub port: u16,
     pub public_key: String,
     pub is_online: bool,
+    #[serde(default)]
+    pub dingo_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -31,6 +33,7 @@ struct Peer {
     public_key: String,
     is_online: bool,
     last_seen: Instant,
+    dingo_id: Option<String>,
 }
 
 impl From<&Peer> for PeerInfo {
@@ -42,6 +45,7 @@ impl From<&Peer> for PeerInfo {
             port: peer.port,
             public_key: peer.public_key.clone(),
             is_online: peer.is_online,
+            dingo_id: peer.dingo_id.clone(),
         }
     }
 }
@@ -83,7 +87,7 @@ impl DiscoveryManager {
         }
     }
 
-    pub fn start(&self, device_id: String, username: String, port: u16, public_key: String) -> Result<bool, String> {
+    pub fn start(&self, device_id: String, username: String, port: u16, public_key: String, dingo_id: Option<String>) -> Result<bool, String> {
         let mut running = self.running.lock().unwrap();
         if *running {
             return Ok(false);
@@ -108,6 +112,7 @@ impl DiscoveryManager {
             port,
             public_key: public_key.clone(),
             is_online: true,
+            dingo_id: dingo_id.clone(),
         };
 
         println!("Starting UDP discovery on port {}", DISCOVERY_PORT);
@@ -147,6 +152,7 @@ impl DiscoveryManager {
                                             public_key: packet.peer.public_key.clone(),
                                             is_online: true,
                                             last_seen: now,
+                                            dingo_id: packet.peer.dingo_id.clone(),
                                         }
                                     });
 
@@ -157,6 +163,9 @@ impl DiscoveryManager {
                                     peer.public_key = packet.peer.public_key;
                                     peer.is_online = true;
                                     peer.last_seen = now;
+                                    if packet.peer.dingo_id.is_some() {
+                                        peer.dingo_id = packet.peer.dingo_id;
+                                    }
 
                                     let event = if is_new {
                                         DiscoveryEvent::PeerDiscovered { peer: (&*peer).into() }

@@ -244,7 +244,12 @@ export default function ChatPage() {
     const peerIpMap = useMemo(() => {
         const map = {};
         (peers || []).forEach(p => {
-            map[p.device_id] = p.ip_address;
+            if (p.device_id) map[p.device_id] = p.ip_address;
+            if (p.username) map[p.username] = p.ip_address;
+            if (p.dingo_id) {
+                map[p.dingo_id] = p.ip_address;
+                map[p.dingo_id.toLowerCase()] = p.ip_address;
+            }
         });
         return map;
     }, [peers]);
@@ -363,7 +368,18 @@ export default function ChatPage() {
         (allUsers || []).forEach(u => {
             if (u.id !== deviceId) {
                 const uid = u.device_id || u.id;
-                const isLanOnline = Boolean(peerIpMap[uid]);
+                const isLanOnline = Boolean(
+                    peerIpMap[uid] ||
+                    peerIpMap[u.id] ||
+                    (u.username && peerIpMap[u.username]) ||
+                    (u.dingo_id && peerIpMap[u.dingo_id]) ||
+                    (peers || []).some(p =>
+                        p.device_id === uid ||
+                        p.device_id === u.id ||
+                        (u.username && p.username && p.username.toLowerCase() === u.username.toLowerCase()) ||
+                        (u.dingo_id && p.dingo_id && p.dingo_id.toLowerCase() === u.dingo_id.toLowerCase())
+                    )
+                );
                 const isP2pConnected = p2pState.isDirectConnected && (
                     p2pState.connectedPeer?.peerId === uid ||
                     p2pState.connectedPeer?.deviceId === uid ||
@@ -384,24 +400,35 @@ export default function ChatPage() {
             }
         });
         // Merge presence but preserve authoritative profile fields from DB
-        // ProfileUpdate signaling messages update both allUsers AND peers,
-        // so the latest username is whichever was updated most recently.
         (peers || []).forEach(p => {
-            const existing = map.get(p.device_id) || {};
-            map.set(p.device_id, {
+            let existingKey = p.device_id;
+            if (!map.has(existingKey)) {
+                for (const [k, v] of map.entries()) {
+                    if (
+                        k === p.device_id ||
+                        v.device_id === p.device_id ||
+                        (p.username && v.username && v.username.toLowerCase() === p.username.toLowerCase()) ||
+                        (p.dingo_id && v.dingo_id && v.dingo_id.toLowerCase() === p.dingo_id.toLowerCase())
+                    ) {
+                        existingKey = k;
+                        break;
+                    }
+                }
+            }
+            const existing = map.get(existingKey) || {};
+            const merged = {
                 ...existing,
                 ...p,
                 id: p.device_id,
                 device_id: p.device_id,
                 is_online: true,
                 isLongDistance: false,
-                // Use the most recently updated username:
-                // - If allUsers (DB) has a username, use it (authoritative from ProfileUpdate)
-                // - If peers has a different one, use peers (live from presence/ProfileUpdate)
-                // - The ProfileUpdate handler updates BOTH, so both should be in sync
                 username: p.username || existing.username,
                 avatar_path: p.avatar_path || existing.avatar_path,
-            });
+                dingo_id: p.dingo_id || existing.dingo_id || null,
+            };
+            map.delete(existingKey);
+            map.set(p.device_id, merged);
         });
 
         let list = Array.from(map.values());
@@ -439,8 +466,13 @@ export default function ChatPage() {
         setActiveGroup(null);
         setShowGroupInfo(false);
         const peerId = user.device_id || user.id;
-        const isLan = Boolean(peerIpMap[peerId] || peers?.some(p => p.device_id === peerId));
-        const handle = user.dingo_id || user.username;
+        const isLan = Boolean(
+            peerIpMap[peerId] ||
+            (user.username && peerIpMap[user.username]) ||
+            (user.dingo_id && peerIpMap[user.dingo_id]) ||
+            peers?.some(p => p.device_id === peerId || (user.username && p.username && p.username.toLowerCase() === user.username.toLowerCase()))
+        );
+        const handle = user.dingo_id || null;
         const peerObj = {
             id: peerId,
             device_id: peerId,
@@ -1181,25 +1213,39 @@ export default function ChatPage() {
     const isOnline = useMemo(() => {
         if (!activePeer) return false;
         const peerId = activePeer.device_id || activePeer.id;
+        const peerName = activePeer.username;
+        const peerDingo = activePeer.dingo_id;
+
         // 1. Local LAN discovery
-        if (peerIpMap[peerId] || (peers || []).some(p => p.device_id === peerId)) {
+        if (
+            peerIpMap[peerId] ||
+            (peerName && peerIpMap[peerName]) ||
+            (peerDingo && peerIpMap[peerDingo]) ||
+            (peers || []).some(p =>
+                p.device_id === peerId ||
+                (peerName && p.username && p.username.toLowerCase() === peerName.toLowerCase()) ||
+                (peerDingo && p.dingo_id && p.dingo_id.toLowerCase() === peerDingo.toLowerCase())
+            )
+        ) {
             return true;
         }
+
         // 2. Direct WebRTC P2P connection active
         if (p2pState.isDirectConnected && (
             p2pState.connectedPeer?.peerId === peerId ||
             p2pState.connectedPeer?.deviceId === peerId ||
-            (activePeer.dingo_id && p2pState.connectedPeer?.dingoId?.toLowerCase() === activePeer.dingo_id.toLowerCase()) ||
-            (activePeer.username && p2pState.connectedPeer?.displayName?.toLowerCase() === activePeer.username.toLowerCase()) ||
-            (activePeer.dingo_id && p2pManager.targetDingoId?.toLowerCase() === activePeer.dingo_id.toLowerCase()) ||
-            (activePeer.username && p2pManager.targetDingoId?.toLowerCase() === activePeer.username.toLowerCase())
+            (peerDingo && p2pState.connectedPeer?.dingoId?.toLowerCase() === peerDingo.toLowerCase()) ||
+            (peerName && p2pState.connectedPeer?.displayName?.toLowerCase() === peerName.toLowerCase()) ||
+            (peerDingo && p2pManager.targetDingoId?.toLowerCase() === peerDingo.toLowerCase()) ||
+            (peerName && p2pManager.targetDingoId?.toLowerCase() === peerName.toLowerCase())
         )) {
             return true;
         }
+
         // 3. Online in presence registry
         if (
-            (activePeer.dingo_id && onlinePresenceSet.has(activePeer.dingo_id.toLowerCase())) ||
-            (activePeer.username && onlinePresenceSet.has(activePeer.username.toLowerCase())) ||
+            (peerDingo && onlinePresenceSet.has(peerDingo.toLowerCase())) ||
+            (peerName && onlinePresenceSet.has(peerName.toLowerCase())) ||
             onlinePresenceSet.has((peerId || '').toLowerCase())
         ) {
             return true;
@@ -1366,14 +1412,18 @@ export default function ChatPage() {
                                             <span className={`status-dot ${u.is_online ? 'online' : 'offline'}`} />
                                         </div>
                                         <div className="peer-info">
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                                                 <span className="peer-name">{u.username || 'Unknown'}</span>
-                                                {u.dingo_id && (
+                                                {u.dingo_id ? (
                                                     <span style={{ fontSize: 10, color: 'var(--primary)', fontWeight: 700 }}>
                                                         @{u.dingo_id}
                                                     </span>
+                                                ) : (
+                                                    <span style={{ fontSize: 9, color: 'var(--text-muted)', fontStyle: 'italic', opacity: 0.8 }}>
+                                                        (No Handle)
+                                                    </span>
                                                 )}
-                                                {!peers?.some(p => p.device_id === uid) && (
+                                                {u.isLongDistance && (
                                                     <span style={{
                                                         fontSize: 9, fontWeight: 800, padding: '1px 5px',
                                                         background: 'var(--accent-lime)', border: '1px solid var(--border)',
@@ -1676,11 +1726,15 @@ export default function ChatPage() {
                         <div className="chat-header-left" onClick={() => setShowProfile(activePeer)}>
                             <UserAvatar name={displayActivePeerName} size={34} avatarUrl={displayActivePeerAvatar} />
                             <div>
-                                <div className="chat-header-name" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <div className="chat-header-name" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                                     <span>{displayActivePeerName}</span>
-                                    {activePeer?.dingo_id && (
+                                    {activePeer?.dingo_id ? (
                                         <span style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 700 }}>
                                             @{activePeer.dingo_id}
+                                        </span>
+                                    ) : (
+                                        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic', background: 'rgba(255,255,255,0.06)', padding: '2px 8px', borderRadius: 4 }}>
+                                            (No Dingo ID / Handle set)
                                         </span>
                                     )}
                                 </div>
@@ -1712,9 +1766,13 @@ export default function ChatPage() {
                                 <div className="chat-empty-inner" style={{ background: 'var(--bg)', border: '2px solid var(--border)', borderRadius: 'var(--radius)', padding: '28px 24px' }}>
                                     <UserAvatar name={displayActivePeerName} size={60} avatarUrl={displayActivePeerAvatar} />
                                     <h3 style={{ marginTop: 12, marginBottom: 4 }}>{displayActivePeerName}</h3>
-                                    {activePeer?.dingo_id && (
+                                    {activePeer?.dingo_id ? (
                                         <div style={{ color: 'var(--primary)', fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
                                             @{activePeer.dingo_id}
+                                        </div>
+                                    ) : (
+                                        <div style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 12, marginBottom: 8 }}>
+                                            No Dingo ID (Handle) set for this contact
                                         </div>
                                     )}
                                     <p style={{ margin: 0, fontSize: 13 }}>

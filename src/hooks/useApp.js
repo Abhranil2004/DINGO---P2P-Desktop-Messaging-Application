@@ -905,11 +905,15 @@ export function useApp() {
             } catch (e) { /* ignore */ }
         }
 
-        // Restart discovery with new username — use the actual signaling port
-        if (fields.username && fields.username !== localUser.username) {
-            try { await api.restartDiscovery(fields.username, signalingPortRef.current || 45678); } catch { /* ok */ }
-            // Rename download folder for old username
-            try { await api.renameUserDownloadFolder(oldUsername, fields.username); } catch { /* ok */ }
+        // Restart discovery with new username/dingo_id — use the actual signaling port
+        if (
+            (fields.username && fields.username !== localUser.username) ||
+            (fields.dingo_id && fields.dingo_id !== localUser.dingo_id)
+        ) {
+            try { await api.restartDiscovery(fields.username || localUser.username, signalingPortRef.current || 45678); } catch { /* ok */ }
+            if (fields.username && fields.username !== localUser.username) {
+                try { await api.renameUserDownloadFolder(oldUsername, fields.username); } catch { /* ok */ }
+            }
         }
 
         return updated;
@@ -1201,10 +1205,16 @@ export function useChat() {
             
             // 1. Try UDP signaling (Local LAN)
             try {
-                await api.relayChatMessage(peerId, msg.id, text, 'text', senderName || '');
-                chatLogger.log('relay', `Relay attempted: ${msg.id.slice(0, 8)}… → ${peerId.slice(0, 8)}…`, { messageId: msg.id, peerId });
+                const targetId = activePeerObjectRef.current?.device_id || peerId;
+                await api.relayChatMessage(targetId, msg.id, text, 'text', senderName || '');
+                chatLogger.log('relay', `Relay attempted: ${msg.id.slice(0, 8)}… → ${targetId.slice(0, 8)}…`, { messageId: msg.id, peerId: targetId });
             } catch (e) {
-                // Expected for WAN/Internet peers
+                // If targetId failed and differed from peerId, try peerId directly
+                if (activePeerObjectRef.current?.device_id && activePeerObjectRef.current.device_id !== peerId) {
+                    try {
+                        await api.relayChatMessage(peerId, msg.id, text, 'text', senderName || '');
+                    } catch { /* ok */ }
+                }
             }
 
             // 2. Direct P2P WebRTC DataChannel (Internet P2P — Zero Cloud Storage)
@@ -1246,11 +1256,15 @@ export function useChat() {
                 
                 // 1. Try UDP signaling (Local LAN)
                 try {
-                    await api.relayChatMessage(peerId, msg.id, fileInfo, messageType, senderName || '');
-                    chatLogger.log('relay', `File relay attempted: ${msg.id.slice(0, 8)}…`, { messageId: msg.id, peerId });
+                    const targetId = activePeerObjectRef.current?.device_id || peerId;
+                    await api.relayChatMessage(targetId, msg.id, fileInfo, messageType, senderName || '');
+                    chatLogger.log('relay', `File relay attempted: ${msg.id.slice(0, 8)}… → ${targetId.slice(0, 8)}…`, { messageId: msg.id, peerId: targetId });
                 } catch (e) {
-                    chatLogger.log('error', `File relay failed: ${msg.id.slice(0, 8)}…`, { messageId: msg.id, peerId, error: String(e) });
-                    console.warn('Local file relay failed, trying P2P DataChannel:', e);
+                    if (activePeerObjectRef.current?.device_id && activePeerObjectRef.current.device_id !== peerId) {
+                        try {
+                            await api.relayChatMessage(peerId, msg.id, fileInfo, messageType, senderName || '');
+                        } catch { /* ok */ }
+                    }
                 }
 
                 // 2. Direct P2P WebRTC DataChannel (Chunked binary transfer with SHA-256 integrity)

@@ -16,6 +16,7 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -529,9 +530,11 @@ pub fn start_discovery<R: Runtime>(
         .crypto
         .get_public_key()
         .ok_or("Public key not initialized")?;
+    let local_user = state.db.get_user(&state.device_id).ok().flatten();
+    let dingo_id = local_user.as_ref().and_then(|u| u.dingo_id.clone());
     if state
         .discovery
-        .start(state.device_id.clone(), username, port, public_key)?
+        .start(state.device_id.clone(), username, port, public_key, dingo_id)?
     {
         let discovery = Arc::clone(&state.discovery);
         let db = Arc::clone(&state.db);
@@ -551,14 +554,26 @@ pub fn start_discovery<R: Runtime>(
                                 &peer.device_id,
                                 &peer.username,
                                 Some(&peer.public_key),
-                                None,
+                                peer.dingo_id.as_deref(),
                             );
-                            // Auto-register peer in signaling for reliable message delivery
+                            // Auto-register peer in signaling for reliable message delivery under all handles
                             let _ = signaling.register_peer(
                                 &peer.device_id,
                                 &peer.ip_address,
                                 peer.port,
                             );
+                            let _ = signaling.register_peer(
+                                &peer.username,
+                                &peer.ip_address,
+                                peer.port,
+                            );
+                            if let Some(ref did) = peer.dingo_id {
+                                let _ = signaling.register_peer(
+                                    did,
+                                    &peer.ip_address,
+                                    peer.port,
+                                );
+                            }
                             let _ = app_clone.emit("peer-discovered", peer);
                         }
                         DiscoveryEvent::PeerUpdated { ref peer } => {
@@ -566,13 +581,25 @@ pub fn start_discovery<R: Runtime>(
                                 &peer.device_id,
                                 &peer.username,
                                 Some(&peer.public_key),
-                                None,
+                                peer.dingo_id.as_deref(),
                             );
                             let _ = signaling.register_peer(
                                 &peer.device_id,
                                 &peer.ip_address,
                                 peer.port,
                             );
+                            let _ = signaling.register_peer(
+                                &peer.username,
+                                &peer.ip_address,
+                                peer.port,
+                            );
+                            if let Some(ref did) = peer.dingo_id {
+                                let _ = signaling.register_peer(
+                                    did,
+                                    &peer.ip_address,
+                                    peer.port,
+                                );
+                            }
                             let _ = app_clone.emit("peer-updated", peer);
                         }
                         DiscoveryEvent::PeerLost { device_id } => {
@@ -733,10 +760,11 @@ pub fn start_signaling<R: Runtime>(
                         avatar_file_port,
                         bio,
                         designation,
+                        dingo_id,
                         ..
                     } => {
-                        println!("[Dingo] Received profile update from {}", from);
-                        let _ = db.upsert_peer_as_user(from, username, None, None);
+                        println!("[Dingo] Received profile update from {} (dingo_id: {:?})", from, dingo_id);
+                        let _ = db.upsert_peer_as_user(from, username, None, dingo_id.as_deref());
 
                         // Resolve avatar URL
                         let resolved_avatar: Option<String> = if let Some(url) = avatar_url {
@@ -776,6 +804,13 @@ pub fn start_signaling<R: Runtime>(
                             None
                         };
 
+                        // Register peer under dingo_id if signaling peer exists
+                        if let Some(ref did) = dingo_id {
+                            if let Some(pc) = signaling.get_peer(&from) {
+                                let _ = signaling.register_peer(did, &pc.address.ip().to_string(), pc.address.port());
+                            }
+                        }
+
                         // CRITICAL: Emit as signaling-message so the JS ProfileUpdate handler
                         // processes it with correct semantics (authoritative profile change,
                         // not a presence update). This fixes username/avatar not reflecting.
@@ -789,6 +824,7 @@ pub fn start_signaling<R: Runtime>(
                                 "avatar_url": resolved_avatar,
                                 "bio": bio,
                                 "designation": designation,
+                                "dingo_id": dingo_id,
                             }),
                         );
                     }
@@ -956,13 +992,76 @@ pub fn register_peer(
     state.signaling.register_peer(&peer_id, &ip, port)
 }
 
+/// Helper to resolve any peer ID (device_id, username, dingo_id, or prefix) to an address
+/// and ensure it is registered in the UDP signaling peer table.
+fn resolve_and_register_peer(state: &AppState, peer_id: &str) -> Option<(String, SocketAddr)> {
+    let clean_id = peer_id.trim_start_matches('@');
+
+    // 1. Look up in active discovery peers
+    let peers = state.discovery.get_peers();
+    if let Some(p) = peers.iter().find(|p| {
+        p.device_id == clean_id
+            || p.username.eq_ignore_ascii_case(clean_id)
+            || p.dingo_id.as_deref().map(|d| d.trim_start_matches('@').eq_ignore_ascii_case(clean_id)).unwrap_or(false)
+            || p.device_id.starts_with(clean_id)
+            || clean_id.starts_with(&p.device_id)
+    }) {
+        if let Ok(addr) = format!("{}:{}", p.ip_address, p.port).parse::<SocketAddr>() {
+            let _ = state.signaling.register_peer(peer_id, &p.ip_address, p.port);
+            let _ = state.signaling.register_peer(&p.device_id, &p.ip_address, p.port);
+            let _ = state.signaling.register_peer(&p.username, &p.ip_address, p.port);
+            if let Some(ref did) = p.dingo_id {
+                let _ = state.signaling.register_peer(did, &p.ip_address, p.port);
+            }
+            return Some((p.device_id.clone(), addr));
+        }
+    }
+
+    // 2. Look up in SQLite DB users
+    if let Ok(all_users) = state.db.get_all_users() {
+        if let Some(u) = all_users.iter().find(|u| {
+            u.id == clean_id
+                || u.device_id == clean_id
+                || u.username.eq_ignore_ascii_case(clean_id)
+                || u.dingo_id.as_deref().map(|d| d.trim_start_matches('@').eq_ignore_ascii_case(clean_id)).unwrap_or(false)
+                || u.device_id.starts_with(clean_id)
+                || clean_id.starts_with(&u.device_id)
+        }) {
+            if let Some(pc) = state.signaling.get_peer(&u.device_id) {
+                let _ = state.signaling.register_peer(peer_id, &pc.address.ip().to_string(), pc.address.port());
+                return Some((u.device_id.clone(), pc.address));
+            }
+            if let Some(p) = peers.iter().find(|p| p.device_id == u.device_id) {
+                if let Ok(addr) = format!("{}:{}", p.ip_address, p.port).parse::<SocketAddr>() {
+                    let _ = state.signaling.register_peer(peer_id, &p.ip_address, p.port);
+                    return Some((u.device_id.clone(), addr));
+                }
+            }
+        }
+    }
+
+    None
+}
+
 #[tauri::command]
 pub fn send_signaling_message(
     state: State<AppState>,
     peer_id: String,
     message: SignalingMessage,
 ) -> Result<(), String> {
-    state.signaling.send_message(&peer_id, &message)
+    if let Ok(()) = state.signaling.send_message(&peer_id, &message) {
+        return Ok(());
+    }
+
+    if let Some((target_device_id, addr)) = resolve_and_register_peer(&state, &peer_id) {
+        let _ = state.signaling.send_to_address(addr, &message);
+        if let Ok(()) = state.signaling.send_message(&target_device_id, &message) {
+            return Ok(());
+        }
+        return state.signaling.send_message(&peer_id, &message);
+    }
+
+    Err(format!("Peer {} not found in signaling or discovery", peer_id))
 }
 
 // ============ ENCRYPTION COMMANDS ============
@@ -1166,13 +1265,15 @@ pub fn restart_discovery(
         .crypto
         .get_public_key()
         .ok_or("Public key not initialized")?;
+    let local_user = state.db.get_user(&state.device_id).ok().flatten();
+    let dingo_id = local_user.as_ref().and_then(|u| u.dingo_id.clone());
     state
         .discovery
-        .start(state.device_id.clone(), username, port, pk)?;
+        .start(state.device_id.clone(), username, port, pk, dingo_id)?;
     Ok(())
 }
 
-/// Relay a chat message via UDP signaling. Auto-registers peer from discovery if not found.
+/// Relay a chat message via UDP signaling. Auto-registers peer from discovery or DB if not found.
 #[tauri::command]
 pub fn relay_chat_message(
     state: State<AppState>,
@@ -1192,26 +1293,22 @@ pub fn relay_chat_message(
         timestamp: now(),
     };
 
-    // Try send; on Peer-not-found auto-register from discovery and retry
-    match state.signaling.send_message(&peer_id, &signaling_msg) {
-        Ok(()) => Ok(()),
-        Err(ref e) if e.contains("not found") || e.contains("Not found") => {
-            // Look up peer in discovery manager
-            let peers = state.discovery.get_peers();
-            if let Some(p) = peers.iter().find(|p| p.device_id == peer_id) {
-                state
-                    .signaling
-                    .register_peer(&peer_id, &p.ip_address, p.port)?;
-                state.signaling.send_message(&peer_id, &signaling_msg)
-            } else {
-                Err(format!(
-                    "Peer {} not found in signaling or discovery",
-                    peer_id
-                ))
-            }
-        }
-        Err(e) => Err(e),
+    // 1. Try send directly if already registered
+    if let Ok(()) = state.signaling.send_message(&peer_id, &signaling_msg) {
+        return Ok(());
     }
+
+    // 2. Resolve peer by device_id, username, dingo_id, or prefix and register all aliases
+    if let Some((target_device_id, addr)) = resolve_and_register_peer(&state, &peer_id) {
+        let _ = state.signaling.send_to_address(addr, &signaling_msg);
+        let _ = state.signaling.send_message(&target_device_id, &signaling_msg);
+        return state.signaling.send_message(&peer_id, &signaling_msg);
+    }
+
+    Err(format!(
+        "Peer {} not found in signaling or discovery",
+        peer_id
+    ))
 }
 
 #[tauri::command]

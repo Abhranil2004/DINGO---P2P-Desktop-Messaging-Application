@@ -123,6 +123,8 @@ pub enum SignalingMessage {
         avatar_file_port: Option<u16>,
         bio: Option<String>,
         designation: Option<String>,
+        #[serde(default)]
+        dingo_id: Option<String>,
     },
     /// Group created / shared with peer
     GroupCreated {
