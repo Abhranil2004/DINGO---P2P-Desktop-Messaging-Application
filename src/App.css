@@ -2063,6 +2063,157 @@ body.dark .chat-home-logo.logo-dark {
 }
 
 /* ================================================================
+   TOAST NOTIFICATIONS & NOTIFICATION CENTER
+   ================================================================ */
+.toast-container,
+.notification-center {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 999999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+  max-width: 500px;
+  width: auto;
+}
+
+.toast {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 22px;
+  border-radius: var(--radius);
+  border: var(--border-width) solid var(--border);
+  box-shadow: var(--shadow-sm);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  animation: toastPopIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  background: var(--bg);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.toast:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+}
+
+.toast svg {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+}
+
+/* Toast Variants */
+.toast-info {
+  background: #ffffff;
+  border-color: var(--border);
+  color: var(--text);
+  box-shadow: 3px 3px 0px var(--primary);
+}
+.toast-info svg {
+  color: var(--primary);
+}
+
+.toast-success {
+  background: #ffffff;
+  border-color: var(--border);
+  color: var(--text);
+  box-shadow: 3px 3px 0px #16a34a;
+}
+.toast-success svg {
+  color: #16a34a;
+}
+
+.toast-error {
+  background: #ffffff;
+  border-color: var(--border);
+  color: var(--danger);
+  box-shadow: 3px 3px 0px var(--danger);
+}
+.toast-error svg {
+  color: var(--danger);
+}
+
+.toast-warning {
+  background: #ffffff;
+  border-color: var(--border);
+  color: var(--text);
+  box-shadow: 3px 3px 0px #f59e0b;
+}
+.toast-warning svg {
+  color: #f59e0b;
+}
+
+/* Dark Theme Overrides */
+body.dark .toast {
+  background: #181926;
+  color: #f0f1f8;
+  border-color: #3b3d4f;
+  box-shadow: 3px 3px 0px #0b0c13;
+}
+
+body.dark .toast-info {
+  background: #17182b;
+  border-color: #7059e2;
+  color: #e0e2fe;
+  box-shadow: 3px 3px 0px #7059e2;
+}
+body.dark .toast-info svg {
+  color: #8b7af0;
+}
+
+body.dark .toast-success {
+  background: #12241b;
+  border-color: #22c55e;
+  color: #dcfce7;
+  box-shadow: 3px 3px 0px #22c55e;
+}
+body.dark .toast-success svg {
+  color: #22c55e;
+}
+
+body.dark .toast-error {
+  background: #2b1419;
+  border-color: #f43f5e;
+  color: #ffe4e6;
+  box-shadow: 3px 3px 0px #f43f5e;
+}
+body.dark .toast-error svg {
+  color: #f43f5e;
+}
+
+body.dark .toast-warning {
+  background: #2b2314;
+  border-color: #f59e0b;
+  color: #fef3c7;
+  box-shadow: 3px 3px 0px #f59e0b;
+}
+body.dark .toast-warning svg {
+  color: #f59e0b;
+}
+
+@keyframes toastPopIn {
+  from {
+    opacity: 0;
+    transform: translateY(-16px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+
+/* ================================================================
    LOADING & SETUP / INSTALLATION SCREEN
    ================================================================ */
 .loading-screen {

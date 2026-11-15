@@ -109,7 +109,7 @@ export default function ChatPage() {
         const myDingoId = (localUser?.dingo_id || '').toLowerCase();
         const myUsername = (localUser?.username || '').toLowerCase();
         if (handle === myDingoId || handle === myUsername) {
-            showToast("That is your own Dingo ID! Please enter a friend's Dingo ID to chat with them.", 'info');
+            showToast("That's your own Dingo ID! Search a friend's handle to chat.", 'info');
             setIsSearchingDingo(false);
             return;
         }
