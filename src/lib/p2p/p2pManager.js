@@ -26,7 +26,10 @@ class P2PManager {
     this.status = 'idle'; // 'idle' | 'generating_invitation' | 'waiting_for_peer' | 'connecting' | 'connected' | 'disconnected' | 'failed'
     this.statusDetails = '';
     this.activeInvitation = null;
-    this.connectedPeer = null; // { peerId, role, connectedAt }
+    this.connectedPeer = null; // { peerId, deviceId, dingoId, displayName, role, connectedAt }
+    this.targetDingoId = null;
+    this.targetDisplayName = null;
+    this.outgoingQueue = []; // Messages queued while handshaking
 
     this.listeners = new Set();
     this.fileProgressListeners = new Set();
@@ -123,6 +126,8 @@ class P2PManager {
           const data = JSON.parse(event.data);
           if (data.type === 'presence:incoming_call') {
             console.log(`[P2PManager] Incoming P2P call from @${data.fromDingoId} (${data.fromDisplayName})`);
+            this.targetDingoId = data.fromDingoId;
+            this.targetDisplayName = data.fromDisplayName;
             
             // Auto accept and join guest room
             this.joinInvitation({
@@ -131,6 +136,9 @@ class P2PManager {
               token: data.token,
               role: 'guest',
               signalingUrl: serverUrl,
+              fromDingoId: data.fromDingoId,
+              fromDisplayName: data.fromDisplayName,
+              fromDeviceId: data.fromDeviceId,
             });
 
             window.dispatchEvent(
@@ -202,6 +210,8 @@ class P2PManager {
   async connectToDingoId(targetDingoId, currentUser) {
     this.disconnect();
     const handle = this.normalizeHandle(targetDingoId);
+    this.targetDingoId = handle;
+    this.targetDisplayName = handle;
     this.setStatus('connecting', `Locating @${handle} via Cloudflare discovery...`);
 
     const serverUrl = this.getSignalingUrl().replace(/\/+$/, '');
@@ -347,7 +357,7 @@ class P2PManager {
   async initiateHostPeerConnection() {
     this.setStatus('connecting', 'Establishing direct WebRTC DataChannel connection...');
 
-    this.peerConnection = new P2PPeerConnection({ isInitiator: true });
+    this.peerConnection = new P2PPeerConnection({ isInitiator: true, peerId: this.targetDingoId || 'remote_peer' });
     this.bindPeerConnectionEvents();
 
     // Send local candidates through Cloudflare signaling
@@ -392,7 +402,7 @@ class P2PManager {
       console.log('[P2PManager] Received host SDP offer. Creating answer...');
       this.setStatus('connecting', 'Negotiating direct P2P encryption keys (DTLS)...');
 
-      this.peerConnection = new P2PPeerConnection({ isInitiator: false });
+      this.peerConnection = new P2PPeerConnection({ isInitiator: false, peerId: this.targetDingoId || 'remote_peer' });
       this.bindPeerConnectionEvents();
 
       this.peerConnection.onLocalIceCandidate = (candidate) => {
@@ -451,7 +461,7 @@ class P2PManager {
     this.disconnect();
     this.setStatus('connecting', 'Generating serverless SDP offer...');
 
-    this.peerConnection = new P2PPeerConnection({ isInitiator: true });
+    this.peerConnection = new P2PPeerConnection({ isInitiator: true, peerId: this.targetDingoId || 'remote_peer' });
     this.bindPeerConnectionEvents();
 
     const candidates = [];
@@ -543,12 +553,25 @@ class P2PManager {
     this.peerConnection.onConnected = (protocolHandler) => {
       this.protocolHandler = protocolHandler;
       this.connectedPeer = {
-        peerId: this.peerConnection.peerId,
+        peerId: this.targetDingoId || this.peerConnection.peerId,
+        dingoId: this.targetDingoId,
+        displayName: this.targetDisplayName,
         role: this.peerConnection.isInitiator ? 'host' : 'guest',
         connectedAt: Date.now(),
       };
       this.setStatus('connected', 'Direct WebRTC DataChannel established!');
       this.setupDirectProtocolListeners();
+
+      // Handshake identity over direct DataChannel
+      if (this.currentUser) {
+        const myDeviceId = this.currentUser.id || this.currentUser.device_id || '';
+        const myDingoId = this.normalizeHandle(this.currentUser.dingo_id || this.currentUser.username);
+        const myDisplayName = this.currentUser.display_name || this.currentUser.username || myDingoId;
+        protocolHandler.sendHandshake(myDeviceId, myDingoId, myDisplayName, this.currentUser.avatar || '');
+      }
+
+      // Flush queued messages immediately!
+      this.flushOutgoingQueue();
     };
 
     this.peerConnection.onDisconnected = (reason) => {
@@ -565,14 +588,40 @@ class P2PManager {
   setupDirectProtocolListeners() {
     if (!this.protocolHandler) return;
 
+    // Direct peer identity handshake
+    this.protocolHandler.onPeerHandshake = async (info) => {
+      console.log('[P2PManager] Received remote peer handshake:', info);
+      if (info.deviceId) {
+        this.connectedPeer.deviceId = info.deviceId;
+        this.connectedPeer.peerId = info.deviceId;
+      }
+      if (info.dingoId) {
+        this.connectedPeer.dingoId = info.dingoId;
+        this.targetDingoId = info.dingoId;
+      }
+      if (info.displayName) {
+        this.connectedPeer.displayName = info.displayName;
+        this.targetDisplayName = info.displayName;
+      }
+      try {
+        await api.upsertPeerUser(info.deviceId || info.dingoId, info.displayName || info.dingoId, null, info.dingoId);
+      } catch (e) {
+        console.warn('[P2PManager] Failed to upsert peer on handshake:', e);
+      }
+      this.notify();
+    };
+
     // Incoming direct text message
     this.protocolHandler.onChatMessage = async (msg) => {
       console.log('[P2PManager] Direct P2P chat message received:', msg);
       try {
+        const senderId = msg.senderId || this.connectedPeer?.deviceId || this.connectedPeer?.peerId || 'p2p-peer';
+        const senderName = msg.senderName || this.connectedPeer?.displayName || 'Peer';
+
         await api.storeIncomingMessage(
           msg.id,
-          msg.senderId,
-          msg.senderName,
+          senderId,
+          senderName,
           msg.content,
           'text',
           new Date(msg.timestamp).toISOString()
@@ -583,9 +632,10 @@ class P2PManager {
           new CustomEvent('dingo:chat-message-received', {
             detail: {
               id: msg.id,
-              peer_id: msg.senderId,
-              sender_id: msg.senderId,
-              sender_name: msg.senderName,
+              peer_id: senderId,
+              sender_id: senderId,
+              sender_name: senderName,
+              sender_dingo_id: this.connectedPeer?.dingoId || this.targetDingoId,
               content: msg.content,
               message_type: 'text',
               created_at: new Date(msg.timestamp).toISOString(),
@@ -604,8 +654,8 @@ class P2PManager {
       try {
         await api.markMessageDelivered(messageId);
         window.dispatchEvent(
-          new CustomEvent('dingo:message-status-updated', {
-            detail: { messageId, status: 'delivered' },
+          new CustomEvent('dingo:pending-delivered', {
+            detail: { messageId, peerId: this.connectedPeer?.deviceId || this.connectedPeer?.peerId },
           })
         );
       } catch {}
@@ -625,6 +675,8 @@ class P2PManager {
         // Store in local shared files SQLite table
         await api.storeSharedFile(file.fileId, file.dataUrl, file.fileName);
 
+        const peerId = this.connectedPeer?.deviceId || this.connectedPeer?.peerId || 'p2p-peer';
+
         // Save incoming file message into conversation
         const contentJson = JSON.stringify({
           fileId: file.fileId,
@@ -637,8 +689,8 @@ class P2PManager {
 
         await api.storeIncomingMessage(
           file.fileId,
-          this.connectedPeer?.peerId || 'p2p-peer',
-          file.senderName,
+          peerId,
+          file.senderName || this.connectedPeer?.displayName || 'Peer',
           contentJson,
           'file'
         );
@@ -647,8 +699,10 @@ class P2PManager {
           new CustomEvent('dingo:chat-message-received', {
             detail: {
               id: file.fileId,
-              peer_id: this.connectedPeer?.peerId || 'p2p-peer',
+              peer_id: peerId,
+              sender_id: peerId,
               sender_name: file.senderName,
+              sender_dingo_id: this.connectedPeer?.dingoId || this.targetDingoId,
               content: contentJson,
               message_type: 'file',
               created_at: new Date().toISOString(),
@@ -666,14 +720,68 @@ class P2PManager {
   // 4. DIRECT MESSAGING & FILE SENDING (DATACHANNEL ONLY)
   // ════════════════════════════════════════════════════════════════
 
+  queueOutgoingMessage(msg) {
+    this.outgoingQueue.push(msg);
+  }
+
+  flushOutgoingQueue() {
+    if (!this.protocolHandler || this.status !== 'connected') return;
+    if (this.outgoingQueue.length === 0) return;
+
+    console.log(`[P2PManager] Flushing ${this.outgoingQueue.length} queued message(s) through DataChannel...`);
+    const queue = [...this.outgoingQueue];
+    this.outgoingQueue = [];
+    for (const item of queue) {
+      try {
+        this.protocolHandler.sendChatMessage(item.messageId, item.senderId, item.senderName, item.content);
+        console.log(`[P2PManager] Sent queued message ${item.messageId}`);
+      } catch (err) {
+        console.error('[P2PManager] Failed to send queued message:', err);
+      }
+    }
+  }
+
+  isDirectConnectedTo(peerId, dingoId) {
+    if (this.status !== 'connected' || !this.protocolHandler) return false;
+    const cleanHandle = dingoId ? this.normalizeHandle(dingoId) : '';
+    const cleanPeer = peerId ? this.normalizeHandle(peerId) : '';
+    const connPeer = this.connectedPeer;
+    if (!connPeer) return false;
+
+    if (cleanPeer && (connPeer.peerId === peerId || connPeer.deviceId === peerId)) return true;
+    if (cleanHandle && (connPeer.dingoId === cleanHandle || connPeer.peerId === cleanHandle)) return true;
+    if (cleanHandle && this.targetDingoId === cleanHandle) return true;
+    return true;
+  }
+
   /**
    * Send text message directly over WebRTC DataChannel (never via Cloudflare)
    */
-  async sendDirectMessage(messageId, senderId, senderName, content) {
-    if (!this.protocolHandler || this.status !== 'connected') {
-      throw new Error('Direct P2P DataChannel is not connected');
+  async sendDirectMessage(messageId, senderId, senderName, content, targetPeerId = null, targetDingoId = null) {
+    if (this.protocolHandler && this.status === 'connected') {
+      this.protocolHandler.sendChatMessage(messageId, senderId, senderName, content);
+      return true;
     }
-    this.protocolHandler.sendChatMessage(messageId, senderId, senderName, content);
+
+    // If connecting or waiting, queue the message to be sent the millisecond connection opens
+    if (this.status === 'connecting' || this.status === 'waiting_for_peer') {
+      console.log(`[P2PManager] Queuing message ${messageId} while WebRTC handshakes...`);
+      this.queueOutgoingMessage({ messageId, senderId, senderName, content });
+      return true;
+    }
+
+    // If disconnected or idle, initiate connection to target peer and queue
+    const handle = targetDingoId || this.targetDingoId || targetPeerId;
+    if (handle && this.currentUser) {
+      console.log(`[P2PManager] Initiating P2P connection to @${handle} and queuing message ${messageId}...`);
+      this.queueOutgoingMessage({ messageId, senderId, senderName, content });
+      this.connectToDingoId(handle, this.currentUser).catch(err => {
+        console.warn('[P2PManager] Auto P2P connect notice:', err?.message || err);
+      });
+      return true;
+    }
+
+    throw new Error('Direct P2P DataChannel is not connected and no target handle available');
   }
 
   /**
@@ -702,6 +810,11 @@ class P2PManager {
     this.protocolHandler = null;
     this.connectedPeer = null;
     this.activeInvitation = null;
+    if (reason === 'User disconnected' || reason === 'Long-distance mode turned off') {
+      this.outgoingQueue = [];
+      this.targetDingoId = null;
+      this.targetDisplayName = null;
+    }
     this.setStatus('disconnected', reason);
   }
 }

@@ -206,6 +206,17 @@ export function useApp() {
                 if (user) {
                     setLocalUser(user);
                     localUserRef.current = user;
+
+                    // Automatically start Long-Distance presence so the user is discoverable
+                    // and can receive real-time direct P2P calls without needing to open settings
+                    try {
+                        const isLongDistanceEnabled = typeof localStorage !== 'undefined' ? localStorage.getItem('dingo_long_distance_p2p') !== 'false' : true;
+                        if (isLongDistanceEnabled) {
+                            p2pManager.startPresence(user);
+                        }
+                    } catch (p2pErr) {
+                        console.warn('[Dingo] Failed to start presence on bootstrap:', p2pErr);
+                    }
                 }
 
                 // Start signaling — capture the ACTUAL port the OS assigned
@@ -837,6 +848,12 @@ export function useApp() {
         );
         if (updated) {
             setLocalUser(updated);
+            try {
+                const isLongDistanceEnabled = typeof localStorage !== 'undefined' ? localStorage.getItem('dingo_long_distance_p2p') !== 'false' : true;
+                if (isLongDistanceEnabled) {
+                    p2pManager.startPresence(updated);
+                }
+            } catch { }
         }
 
         // *** CRITICAL: Broadcast profile update to ALL peers immediately ***
@@ -1047,6 +1064,7 @@ export function useChat() {
     const [loading, setLoading] = useState(false);
     const [activePeer, setActivePeer] = useState(null);
     const activePeerRef = useRef(null); // Stable ref for event handlers (no re-subscribe on peer object changes)
+    const activePeerObjectRef = useRef(null);
     const pollRef = useRef(null);
 
     // Load messages for a peer
@@ -1099,6 +1117,7 @@ export function useChat() {
         setActivePeer(peer);
         const peerId = peer ? (peer.device_id || peer.id) : null;
         activePeerRef.current = peerId;
+        activePeerObjectRef.current = peer;
         if (peer) {
             loadMessages(peerId);
         } else {
@@ -1110,16 +1129,31 @@ export function useChat() {
     // This prevents tearing down the message listener and losing incoming messages
     const updatePeerInfo = useCallback((updatedPeer) => {
         setActivePeer(updatedPeer);
+        activePeerObjectRef.current = updatedPeer;
         // DO NOT update activePeerRef or reload messages — just update the display object
     }, []);
 
-    // Listen for incoming messages — uses stable activePeerRef to avoid re-subscribing
+    // Listen for incoming messages — uses stable activePeerRef and activePeerObjectRef to avoid re-subscribing
     // on every cosmetic peer update (name/avatar change). This prevents dropping messages.
     useEffect(() => {
         const unsub = api.onChatMessageReceived(async (msg) => {
             const currentPeerId = activePeerRef.current;
-            if (!currentPeerId) return;
-            if (msg.sender_id === currentPeerId) {
+            const currentPeer = activePeerObjectRef.current;
+            if (!currentPeerId && !currentPeer) return;
+
+            const isMatch =
+                msg.sender_id === currentPeerId ||
+                msg.peer_id === currentPeerId ||
+                (currentPeer && (
+                    msg.sender_id === currentPeer.device_id ||
+                    msg.sender_id === currentPeer.id ||
+                    msg.peer_id === currentPeer.device_id ||
+                    msg.peer_id === currentPeer.id ||
+                    (currentPeer.dingo_id && msg.sender_dingo_id?.toLowerCase() === currentPeer.dingo_id.toLowerCase()) ||
+                    (currentPeer.username && msg.sender_name?.toLowerCase() === currentPeer.username.toLowerCase())
+                ));
+
+            if (isMatch) {
                 // Annotate file messages with basic info - the UI will handle loading
                 const newMsg = { ...msg };
                 try {
@@ -1148,12 +1182,9 @@ export function useChat() {
         if (typeof window === 'undefined') return;
         const handler = (e) => {
             try {
-                const { peerId, messageId } = e?.detail || {};
-                const currentPeerId = activePeerRef.current;
-                if (!peerId || !messageId) return;
-                if (peerId === currentPeerId) {
-                    setMessages(prev => prev.map(m => m.id === messageId ? { ...m, is_delivered: true } : m));
-                }
+                const { messageId } = e?.detail || {};
+                if (!messageId) return;
+                setMessages(prev => prev.map(m => m.id === messageId ? { ...m, is_delivered: true } : m));
             } catch (err) { /* ignore */ }
         };
         window.addEventListener('dingo:pending-delivered', handler);
@@ -1173,18 +1204,16 @@ export function useChat() {
                 await api.relayChatMessage(peerId, msg.id, text, 'text', senderName || '');
                 chatLogger.log('relay', `Relay attempted: ${msg.id.slice(0, 8)}… → ${peerId.slice(0, 8)}…`, { messageId: msg.id, peerId });
             } catch (e) {
-                chatLogger.log('error', `Relay failed: ${msg.id.slice(0, 8)}… → ${peerId.slice(0, 8)}…`, { messageId: msg.id, peerId, error: String(e) });
-                console.warn('Local relay failed, trying P2P DataChannel:', e);
+                // Expected for WAN/Internet peers
             }
 
             // 2. Direct P2P WebRTC DataChannel (Internet P2P — Zero Cloud Storage)
-            if (p2pManager.status === 'connected') {
-                try {
-                    p2pManager.sendDirectMessage(msg.id, deviceIdRef.current, senderName || '', text);
-                    chatLogger.log('send', `Direct P2P DataChannel message sent: ${msg.id.slice(0, 8)}…`, { messageId: msg.id, peerId });
-                } catch (e) {
-                    console.warn('Direct P2P send failed:', e);
-                }
+            try {
+                const targetDingoId = activePeerObjectRef.current?.dingo_id || activePeerObjectRef.current?.username || peerId;
+                await p2pManager.sendDirectMessage(msg.id, deviceIdRef.current, senderName || '', text, peerId, targetDingoId);
+                chatLogger.log('send', `Direct P2P DataChannel message delivered or queued: ${msg.id.slice(0, 8)}…`, { messageId: msg.id, peerId });
+            } catch (e) {
+                console.warn('Direct P2P send warning:', e);
             }
         } else {
             chatLogger.log('error', `Failed to save message to DB`, { peerId });
@@ -1225,6 +1254,11 @@ export function useChat() {
                 }
 
                 // 2. Direct P2P WebRTC DataChannel (Chunked binary transfer with SHA-256 integrity)
+                if (p2pManager.status === 'connecting' || p2pManager.status === 'waiting_for_peer') {
+                    for (let i = 0; i < 20 && p2pManager.status !== 'connected'; i++) {
+                        await new Promise(r => setTimeout(r, 150));
+                    }
+                }
                 if (p2pManager.status === 'connected') {
                     try {
                         const blob = await fetch(dataUrl).then(r => r.blob());

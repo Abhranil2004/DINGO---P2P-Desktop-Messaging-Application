@@ -57,6 +57,7 @@ export class DirectProtocolHandler {
     this.onChatMessage = null;       // (msg: { id, senderId, senderName, content, timestamp }) => void
     this.onMessageAck = null;        // (msgId: string, timestamp: number) => void
     this.onMessageRead = null;       // (msgId: string, timestamp: number) => void
+    this.onPeerHandshake = null;     // (info: { deviceId, dingoId, displayName, avatar }) => void
     this.onFileTransferStart = null; // (meta: { fileId, fileName, fileSize, mimeType, senderName, sha256 }) => void
     this.onFileProgress = null;      // (fileId: string, percent: number, transferredBytes: number, totalBytes: number) => void
     this.onFileReceived = null;      // (file: { fileId, fileName, fileSize, mimeType, dataUrl, sha256, senderName }) => void
@@ -100,6 +101,15 @@ export class DirectProtocolHandler {
 
       case 'chat:read':
         this.onMessageRead?.(packet.messageId, packet.timestamp);
+        break;
+
+      case 'peer:handshake':
+        this.onPeerHandshake?.({
+          deviceId: packet.deviceId,
+          dingoId: packet.dingoId,
+          displayName: packet.displayName,
+          avatar: packet.avatar,
+        });
         break;
 
       case 'file:start':
@@ -192,6 +202,18 @@ export class DirectProtocolHandler {
     if (this.channel && this.channel.readyState === 'open') {
       this.channel.send(JSON.stringify(packet));
     }
+  }
+
+  sendHandshake(deviceId, dingoId, displayName, avatar) {
+    this.send({
+      protocol: 'dingo-v1',
+      type: 'peer:handshake',
+      deviceId,
+      dingoId,
+      displayName,
+      avatar,
+      timestamp: Date.now(),
+    });
   }
 
   sendChatMessage(id, senderId, senderName, content) {

@@ -87,11 +87,47 @@ export default function ChatPage() {
     const [dingoSearchInput, setDingoSearchInput] = useState('');
     const [isSearchingDingo, setIsSearchingDingo] = useState(false);
     const [p2pState, setP2pState] = useState(p2pManager.getState());
+    const [onlinePresenceSet, setOnlinePresenceSet] = useState(new Set());
 
     useEffect(() => {
         const unsub = p2pManager.subscribe((state) => setP2pState(state));
         return unsub;
     }, []);
+
+    // Periodically check global Dingo presence for WAN / Long-Distance peers
+    useEffect(() => {
+        let isMounted = true;
+        const checkWanPresence = async () => {
+            const wanUsers = (allUsers || []).filter(u => !peerIpMap[u.device_id || u.id]);
+            if (wanUsers.length === 0) return;
+            const updated = new Set();
+            for (const u of wanUsers) {
+                const handle = u.dingo_id || u.username;
+                if (!handle) continue;
+                try {
+                    const res = await p2pManager.lookupPresence(handle);
+                    if (res && res.online) {
+                        const h = handle.toLowerCase();
+                        updated.add(h);
+                        if (u.dingo_id) updated.add(u.dingo_id.toLowerCase());
+                        if (u.username) updated.add(u.username.toLowerCase());
+                        if (u.device_id) updated.add(u.device_id.toLowerCase());
+                        if (u.id) updated.add(u.id.toLowerCase());
+                    }
+                } catch { }
+            }
+            if (isMounted) {
+                setOnlinePresenceSet(updated);
+            }
+        };
+
+        checkWanPresence();
+        const timer = setInterval(checkWanPresence, 20000);
+        return () => {
+            isMounted = false;
+            clearInterval(timer);
+        };
+    }, [allUsers, peerIpMap]);
 
     // Toast helper
     const showToast = useCallback((message, type = 'info') => {
@@ -326,10 +362,24 @@ export default function ChatPage() {
         // Add all users from DB
         (allUsers || []).forEach(u => {
             if (u.id !== deviceId) {
+                const uid = u.device_id || u.id;
+                const isLanOnline = Boolean(peerIpMap[uid]);
+                const isP2pConnected = p2pState.isDirectConnected && (
+                    p2pState.connectedPeer?.peerId === uid ||
+                    p2pState.connectedPeer?.deviceId === uid ||
+                    (u.dingo_id && p2pState.connectedPeer?.dingoId?.toLowerCase() === u.dingo_id.toLowerCase()) ||
+                    (u.username && p2pState.connectedPeer?.displayName?.toLowerCase() === u.username.toLowerCase())
+                );
+                const isWanOnline =
+                    (u.dingo_id && onlinePresenceSet.has(u.dingo_id.toLowerCase())) ||
+                    (u.username && onlinePresenceSet.has(u.username.toLowerCase())) ||
+                    onlinePresenceSet.has(uid.toLowerCase());
+
                 map.set(u.id, {
                     ...u,
-                    device_id: u.device_id || u.id,
-                    is_online: false,
+                    device_id: uid,
+                    is_online: isLanOnline || isP2pConnected || isWanOnline || Boolean(u.is_online),
+                    isLongDistance: !isLanOnline,
                 });
             }
         });
@@ -342,7 +392,9 @@ export default function ChatPage() {
                 ...existing,
                 ...p,
                 id: p.device_id,
+                device_id: p.device_id,
                 is_online: true,
+                isLongDistance: false,
                 // Use the most recently updated username:
                 // - If allUsers (DB) has a username, use it (authoritative from ProfileUpdate)
                 // - If peers has a different one, use peers (live from presence/ProfileUpdate)
@@ -375,7 +427,7 @@ export default function ChatPage() {
             });
         }
         return list;
-    }, [allUsers, peers, deviceId, lastMessages, search]);
+    }, [allUsers, peers, deviceId, lastMessages, search, peerIpMap, p2pState, onlinePresenceSet]);
 
     // ─── Scroll to bottom on new messages ──────────────────
     useEffect(() => {
@@ -387,10 +439,15 @@ export default function ChatPage() {
         setActiveGroup(null);
         setShowGroupInfo(false);
         const peerId = user.device_id || user.id;
+        const isLan = Boolean(peerIpMap[peerId] || peers?.some(p => p.device_id === peerId));
+        const handle = user.dingo_id || user.username;
         const peerObj = {
+            id: peerId,
             device_id: peerId,
             username: user.username,
+            dingo_id: handle,
             is_online: user.is_online,
+            isLongDistance: !isLan,
             ip_address: user.ip_address || peerIpMap[peerId],
             // Prefer whatever avatar we have in the user record, otherwise use hydrated local cache
             avatar_path: user.avatar_path || avatarCache.getLocalAvatarUrl(peerId) || undefined,
@@ -399,7 +456,17 @@ export default function ChatPage() {
         clearUnread(peerId);
         // Track active peer to suppress unread badge for this conversation
         if (setActiveChatPeerId) setActiveChatPeerId(peerId);
-    }, [chat.selectPeer, clearUnread, peerIpMap, setActiveChatPeerId]);
+
+        // Auto-connect to Long-Distance / WAN peer if not already connected
+        if (!isLan && handle) {
+            if (!p2pManager.isDirectConnectedTo(peerId, handle)) {
+                console.log('[Dingo] Auto-connecting Long-Distance P2P to @' + handle);
+                p2pManager.connectToDingoId(handle, localUser).catch(err => {
+                    console.warn('[Dingo] Auto P2P direct connect notice:', err?.message || err);
+                });
+            }
+        }
+    }, [chat.selectPeer, clearUnread, peerIpMap, peers, setActiveChatPeerId, localUser]);
 
     // ─── Select group ──────────────────────────────────────
     const selectGroup = useCallback(async (group) => {
@@ -1111,7 +1178,34 @@ export default function ChatPage() {
     //  Render
     // ═══════════════════════════════════════════════════════════
     const activePeer = chat.activePeer;
-    const isOnline = activePeer && peerIpMap[activePeer.device_id];
+    const isOnline = useMemo(() => {
+        if (!activePeer) return false;
+        const peerId = activePeer.device_id || activePeer.id;
+        // 1. Local LAN discovery
+        if (peerIpMap[peerId] || (peers || []).some(p => p.device_id === peerId)) {
+            return true;
+        }
+        // 2. Direct WebRTC P2P connection active
+        if (p2pState.isDirectConnected && (
+            p2pState.connectedPeer?.peerId === peerId ||
+            p2pState.connectedPeer?.deviceId === peerId ||
+            (activePeer.dingo_id && p2pState.connectedPeer?.dingoId?.toLowerCase() === activePeer.dingo_id.toLowerCase()) ||
+            (activePeer.username && p2pState.connectedPeer?.displayName?.toLowerCase() === activePeer.username.toLowerCase()) ||
+            (activePeer.dingo_id && p2pManager.targetDingoId?.toLowerCase() === activePeer.dingo_id.toLowerCase()) ||
+            (activePeer.username && p2pManager.targetDingoId?.toLowerCase() === activePeer.username.toLowerCase())
+        )) {
+            return true;
+        }
+        // 3. Online in presence registry
+        if (
+            (activePeer.dingo_id && onlinePresenceSet.has(activePeer.dingo_id.toLowerCase())) ||
+            (activePeer.username && onlinePresenceSet.has(activePeer.username.toLowerCase())) ||
+            onlinePresenceSet.has((peerId || '').toLowerCase())
+        ) {
+            return true;
+        }
+        return Boolean(activePeer.is_online || activePeer.isOnline);
+    }, [activePeer, peerIpMap, peers, p2pState, onlinePresenceSet]);
 
     // Sync activePeer display info (name/avatar) from authoritative sources
     // CRITICAL: Use updatePeerInfo instead of selectPeer to avoid tearing down
@@ -1591,7 +1685,13 @@ export default function ChatPage() {
                                     )}
                                 </div>
                                 <div className="chat-header-status">
-                                    {isOnline ? '🟢 Online' : '⚫ Offline'}
+                                    {isOnline ? (
+                                        <span style={{ color: 'var(--primary)', fontWeight: 700 }}>🟢 Online</span>
+                                    ) : (p2pState.status === 'connecting' || p2pState.status === 'waiting_for_peer') ? (
+                                        <span style={{ color: '#eab308', fontWeight: 600 }}>🟡 Connecting P2P…</span>
+                                    ) : (
+                                        <span style={{ color: 'var(--text-muted)' }}>⚫ Offline</span>
+                                    )}
                                 </div>
                             </div>
                         </div>
