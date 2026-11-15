@@ -14,4 +14,7 @@
 
   ; Flush Windows shell icon cache
   System::Call 'shell32.dll::SHChangeNotify(i 0x08000000, i 0, i 0, i 0)'
+
+  ; Allow Dingo through Windows Defender Firewall for all network profiles (Private and Public Wi-Fi)
+  nsExec::Exec 'netsh advfirewall firewall add rule name="Dingo P2P" dir=in action=allow program="$INSTDIR\${MAINBINARYNAME}.exe" enable=yes profile=any'
 !macroend

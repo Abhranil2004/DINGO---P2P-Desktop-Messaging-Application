@@ -754,55 +754,104 @@ export function useApp() {
         return () => clearTimeout(id);
     }, [initialized, cacheAvatarsForAllUsers]);
 
-    // ─── incoming chat messages — update sidebar ─────────────
+    // ─── incoming chat messages — update sidebar & contacts ─────────────
+    const handleIncomingMessage = useCallback(async (msg) => {
+        if (!msg) return;
+        // Skip meeting chat messages — they are ephemeral and should NOT affect DM state.
+        if (msg.content?.startsWith('[MEETING_CHAT]')) return;
+
+        const senderId = msg.sender_id || msg.peer_id || msg.from;
+        if (!senderId) return;
+
+        chatLogger.log('receive', `Received ${msg.message_type || 'text'} from ${msg.sender_name || senderId.slice(0, 8)}`, {
+            messageId: msg.id, senderId, senderName: msg.sender_name,
+            messageType: msg.message_type, contentLen: msg.content?.length,
+        });
+
+        // CRITICAL FIX: Ensure sender exists in allUsers so they IMMEDIATELY appear in the sidebar contact list
+        setAllUsers(prev => {
+            const exists = prev.find(u => u.id === senderId || u.device_id === senderId);
+            if (exists) {
+                return prev.map(u => (u.id === senderId || u.device_id === senderId)
+                    ? {
+                        ...u,
+                        username: u.username || msg.sender_name || 'User',
+                        is_online: true,
+                        dingo_id: msg.sender_dingo_id || u.dingo_id,
+                    }
+                    : u
+                );
+            }
+            return [...prev, {
+                id: senderId,
+                device_id: senderId,
+                username: msg.sender_name || 'User',
+                dingo_id: msg.sender_dingo_id || undefined,
+                is_online: true,
+                avatar_path: avatarCache.getLocalAvatarUrl(senderId) || undefined,
+                created_at: msg.created_at || new Date().toISOString(),
+            }];
+        });
+
+        // Update last messages
+        setLastMessages(prev => ({
+            ...prev,
+            [senderId]: {
+                peer_id: senderId,
+                content: msg.content,
+                message_type: msg.message_type || inferMessageType(msg.content),
+                created_at: msg.created_at || new Date().toISOString(),
+                sender_id: senderId,
+                username: msg.sender_name || 'User',
+            }
+        }));
+
+        // Increment unread if NOT currently chatting with this peer
+        if (activeChatPeerIdRef.current !== senderId) {
+            setUnreadCounts(prev => ({
+                ...prev,
+                [senderId]: (prev[senderId] || 0) + 1,
+            }));
+
+            // Show Windows notification (works when app is minimized/closed)
+            const preview = msg.message_type === 'text'
+                ? msg.content
+                : `Sent ${msg.message_type}`;
+
+            let senderAvatar = null;
+            const sender = allUsersRef.current.find(u => u.id === senderId);
+            if (sender?.avatar_path) {
+                senderAvatar = sender.avatar_path;
+            }
+
+            showMessageNotification(msg.sender_name || 'User', preview, senderId, senderAvatar);
+        }
+
+        // Auto-download file/image/video messages
+        autoDownloadFileMessage(msg);
+    }, [autoDownloadFileMessage]);
+
     useEffect(() => {
         if (!initialized) return;
-        const unsub = api.onChatMessageReceived(msg => {
-            // Skip meeting chat messages — they are ephemeral and should NOT affect DM state.
-            if (msg.content?.startsWith('[MEETING_CHAT]')) return;
+        const unsubs = [];
 
-            chatLogger.log('receive', `Received ${msg.message_type || 'text'} from ${msg.sender_name || msg.sender_id?.slice(0, 8)}`, {
-                messageId: msg.id, senderId: msg.sender_id, senderName: msg.sender_name,
-                messageType: msg.message_type, contentLen: msg.content?.length,
+        // 1. Listen to Tauri UDP signaling messages
+        unsubs.push(api.onChatMessageReceived(handleIncomingMessage));
+
+        // 2. Listen to WebRTC DataChannel direct P2P messages
+        const directHandler = (e) => {
+            if (e?.detail) handleIncomingMessage(e.detail);
+        };
+        window.addEventListener('dingo:chat-message-received', directHandler);
+        unsubs.push(() => window.removeEventListener('dingo:chat-message-received', directHandler));
+
+        return () => {
+            unsubs.forEach(u => {
+                if (typeof u === 'function') u();
+                else u?.then?.(fn => fn?.());
             });
-
-            // Update last messages
-            setLastMessages(prev => ({
-                ...prev,
-                [msg.sender_id]: {
-                    peer_id: msg.sender_id,
-                    content: msg.content,
-                    message_type: msg.message_type || inferMessageType(msg.content),
-                    created_at: msg.created_at,
-                    sender_id: msg.sender_id,
-                    username: msg.sender_name || 'User',
-                }
-            }));
-            // Only increment unread if NOT currently chatting with this peer
-            if (activeChatPeerIdRef.current !== msg.sender_id) {
-                setUnreadCounts(prev => ({
-                    ...prev,
-                    [msg.sender_id]: (prev[msg.sender_id] || 0) + 1,
-                }));
-                // Show Windows notification (works when app is minimized/closed)
-                const preview = msg.message_type === 'text'
-                    ? msg.content
-                    : `Sent ${msg.message_type}`;
-
-                // Get sender's avatar from allUsers (use ref to avoid stale closure)
-                let senderAvatar = null;
-                const sender = allUsersRef.current.find(u => u.id === msg.sender_id);
-                if (sender?.avatar_path) {
-                    senderAvatar = sender.avatar_path;
-                }
-
-                showMessageNotification(msg.sender_name || 'User', preview, msg.sender_id, senderAvatar);
-            }
-            // Auto-download file/image/video messages
-            autoDownloadFileMessage(msg);
-        });
-        return () => { unsub.then?.(fn => fn?.()); };
-    }, [initialized, autoDownloadFileMessage]); // allUsers accessed via ref — no re-subscription needed
+        };
+    }, [initialized, handleIncomingMessage]);
 
     // ─── handle notification clicks — open specific chat ────
     useEffect(() => {
@@ -1143,10 +1192,9 @@ export function useChat() {
         // DO NOT update activePeerRef or reload messages — just update the display object
     }, []);
 
-    // Listen for incoming messages — uses stable activePeerRef and activePeerObjectRef to avoid re-subscribing
-    // on every cosmetic peer update (name/avatar change). This prevents dropping messages.
+    // Listen for incoming messages — both from Tauri UDP signaling AND direct WebRTC DataChannel
     useEffect(() => {
-        const unsub = api.onChatMessageReceived(async (msg) => {
+        const handleIncoming = (msg) => {
             const currentPeerId = activePeerRef.current;
             const currentPeer = activePeerObjectRef.current;
             if (!currentPeerId && !currentPeer) return;
@@ -1183,8 +1231,19 @@ export function useChat() {
                     return [...prev, newMsg];
                 });
             }
-        });
-        return () => { unsub.then?.(fn => fn?.()); };
+        };
+
+        const unsub = api.onChatMessageReceived(handleIncoming);
+
+        const directHandler = (e) => {
+            if (e?.detail) handleIncoming(e.detail);
+        };
+        window.addEventListener('dingo:chat-message-received', directHandler);
+
+        return () => {
+            unsub.then?.(fn => fn?.());
+            window.removeEventListener('dingo:chat-message-received', directHandler);
+        };
     }, []); // Empty deps — never re-subscribes. Uses ref for current peer ID.
 
     // Listen for pending-delivered events and update active chat messages

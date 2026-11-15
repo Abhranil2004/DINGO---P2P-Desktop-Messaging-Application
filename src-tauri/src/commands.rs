@@ -198,6 +198,20 @@ pub fn init_app(state: State<AppState>) -> Result<InitResult, String> {
         file_port
     ));
 
+    #[cfg(windows)]
+    std::thread::spawn(|| {
+        if let Ok(exe_path) = std::env::current_exe() {
+            let exe_str = exe_path.to_string_lossy();
+            let _ = std::process::Command::new("netsh")
+                .args([
+                    "advfirewall", "firewall", "add", "rule",
+                    "name=Dingo P2P", "dir=in", "action=allow",
+                    &format!("program={}", exe_str), "enable=yes", "profile=any",
+                ])
+                .output();
+        }
+    });
+
     // Add a small delay to ensure the server thread has time to bind
     std::thread::sleep(std::time::Duration::from_millis(100));
 
@@ -533,7 +547,7 @@ pub fn start_discovery<R: Runtime>(
     let public_key = state
         .crypto
         .get_public_key()
-        .ok_or("Public key not initialized")?;
+        .unwrap_or_else(|| state.crypto.generate_keypair());
     let local_user = state.db.get_user(&state.device_id).ok().flatten();
     let dingo_id = local_user.as_ref().and_then(|u| u.dingo_id.clone());
     if state
@@ -1050,6 +1064,17 @@ fn resolve_and_register_peer(state: &AppState, peer_id: &str) -> Option<(String,
         }
     }
 
+    // 3. Direct IP address resolution
+    if let Ok(ip) = clean_id.parse::<std::net::IpAddr>() {
+        let addr = SocketAddr::new(ip, 45678);
+        let _ = state.signaling.register_peer(peer_id, &ip.to_string(), 45678);
+        return Some((peer_id.to_string(), addr));
+    }
+    if let Ok(addr) = clean_id.parse::<SocketAddr>() {
+        let _ = state.signaling.register_peer(peer_id, &addr.ip().to_string(), addr.port());
+        return Some((peer_id.to_string(), addr));
+    }
+
     None
 }
 
@@ -1274,7 +1299,7 @@ pub fn restart_discovery(
     let pk = state
         .crypto
         .get_public_key()
-        .ok_or("Public key not initialized")?;
+        .unwrap_or_else(|| state.crypto.generate_keypair());
     let local_user = state.db.get_user(&state.device_id).ok().flatten();
     let dingo_id = local_user.as_ref().and_then(|u| u.dingo_id.clone());
     state

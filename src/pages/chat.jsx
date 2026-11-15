@@ -446,6 +446,19 @@ export default function ChatPage() {
             map.set(p.device_id, merged);
         });
 
+        // Ensure any contact who has messaged or exists in lastMessages appears in the contact list
+        Object.entries(lastMessages || {}).forEach(([uid, lm]) => {
+            if (uid && uid !== deviceId && !map.has(uid)) {
+                map.set(uid, {
+                    id: uid,
+                    device_id: uid,
+                    username: lm?.username || 'User',
+                    is_online: Boolean(peerIpMap[uid]),
+                    isLongDistance: !Boolean(peerIpMap[uid]),
+                });
+            }
+        });
+
         let list = Array.from(map.values());
 
         // Sort: online first, then by last message time, then alphabetical
