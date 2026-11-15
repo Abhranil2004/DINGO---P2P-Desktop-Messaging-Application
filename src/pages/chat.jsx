@@ -175,9 +175,20 @@ export default function ChatPage() {
             console.warn('Global Dingo presence lookup failed:', e);
         }
 
-        // 4. User is not on local network or online globally
-        showToast(`User "@${handle}" is currently offline or not found.`, 'info');
+        // 4. Open conversation with @handle directly
+        const peerObj = {
+            id: `p2p_${handle}`,
+            device_id: `p2p_${handle}`,
+            username: handle,
+            dingo_id: handle,
+            isLongDistance: true,
+            isOnline: false,
+        };
+        chat.selectPeer(peerObj);
+        setShowFindDingoModal(false);
+        setDingoSearchInput('');
         setIsSearchingDingo(false);
+        showToast(`Opened conversation with @${handle}`, 'success');
     }, [chat.selectPeer, showToast, peers, localUser]);
 
     // Peer IP lookup
@@ -2018,17 +2029,6 @@ export default function ChatPage() {
                             <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>
                                 Connect with friends outside your local network. Enter their unique Dingo ID (Handle) to start chatting.
                             </p>
-
-                            <div style={{
-                                padding: '8px 12px', background: 'var(--bg-secondary)',
-                                borderRadius: 'var(--radius-sm)', border: '2px solid var(--border)',
-                                display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12
-                            }}>
-                                <span style={{ fontWeight: 600 }}>Long-Distance P2P Status:</span>
-                                <span style={{ fontWeight: 800 }}>
-                                    {p2pState.isDirectConnected ? '🟢 DIRECT P2P CONNECTION' : p2pState.status === 'connecting' ? '🟡 Connecting...' : '⚪ Offline'}
-                                </span>
-                            </div>
 
                             <form onSubmit={(e) => { e.preventDefault(); handleSearchDingoId(dingoSearchInput); }}>
                                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: 16 }}>
