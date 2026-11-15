@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DINGO — Pure Peer-to-Peer Desktop Messaging & File Sharing</title>
+  <meta name="description" content="Next-Generation P2P Desktop Messaging. Direct WebRTC DataChannels, local Wi-Fi, zero central cloud servers, and full end-to-end encryption.">
+  
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="assets/dingo-icon.png">
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800;900&family=Space+Grotesk:wght@500;700;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="dark">
+  <!-- Interactive Flying Plane Canvas Background -->
+  <canvas id="flight-canvas"></canvas>
+
+  <!-- Navigation -->
+  <header class="navbar-wrapper">
+    <nav class="navbar">
+      <a href="#" class="brand-link">
+        <img src="assets/dingo-banner.png" alt="DINGO" class="nav-logo">
+      </a>
+      
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#how-it-works">How It Works</a>
+        <a href="#interactive-demo">Live Demo</a>
+        <a href="#comparison">Why DINGO?</a>
+        <a href="https://github.com/Abhranil2004/DINGO---P2P-Desktop-Messaging-Application" target="_blank" rel="noreferrer" class="nav-github-link">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          GitHub
+        </a>
+      </div>
+
+      <div class="nav-actions">
+        <button id="theme-toggle" class="brutalist-btn btn-sm" title="Toggle Light / Dark mode">
+          <span class="theme-icon">☀️</span>
+        </button>
+        <a href="#download" class="brutalist-btn btn-primary btn-sm nav-download-btn">
+          Download Setup →
+        </a>
+      </div>
+    </nav>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero-section">
+    <div class="hero-container">
+      <div class="hero-content">
+        <div class="hero-badge">
+          <span class="pulse-dot"></span>
+          <span>v1.0.1 Stable Release • Windows Desktop</span>
+        </div>
+        
+        <h1 class="hero-title">
+          NO CLOUD.<br>
+          <span class="highlight-lime">ZERO TRACKING.</span><br>
+          JUST PURE P2P.
+        </h1>
+        
+        <p class="hero-subtitle">
+          DINGO is an ultra-fast desktop messaging application that connects devices directly over <strong>local Wi-Fi</strong> and <strong>global WebRTC DataChannels</strong>. Your messages and files never touch a cloud server.
+        </p>
+
+        <!-- Main Download CTA Box -->
+        <div class="download-box" id="download">
+          <div class="download-main-row">
+            <a href="https://github.com/Abhranil2004/DINGO---P2P-Desktop-Messaging-Application/releases/download/v1.0.1/Dingo_1.0.1_x64-setup.exe" id="main-download-btn" class="brutalist-btn btn-primary btn-hero-dl" download="Dingo_1.0.1_x64-setup.exe">
+              <span class="dl-icon">⬇</span>
+              <div class="dl-text-wrap">
+                <span class="dl-label">DOWNLOAD SETUP (.EXE)</span>
+                <span class="dl-sub">Windows 10 / 11 (64-bit) • v1.0.1 • 5.7 MB</span>
+              </div>
+            </a>
+            
+            <a href="https://github.com/Abhranil2004/DINGO---P2P-Desktop-Messaging-Application/releases/download/v1.0.1/Dingo.exe" class="brutalist-btn btn-secondary btn-hero-portable" download="Dingo.exe" title="Download portable standalone binary">
+              <span class="portable-icon">📦</span>
+              <span>Portable (.exe)</span>
+            </a>
+          </div>
+
+          <!-- Micro specs & Checksum -->
+          <div class="download-meta">
+            <span class="meta-item">🔒 Direct End-to-End Encrypted</span>
+            <span class="meta-divider">•</span>
+            <span class="meta-item">⚡ Direct WebRTC Speed</span>
+            <span class="meta-divider">•</span>
+            <span class="meta-item">💻 Built with Rust & Tauri v2</span>
+          </div>
+
+          <div class="sha-box">
+            <span class="sha-label">SHA-256 Checksum:</span>
+            <code id="sha-text">CB4B5F41D4ED25A643B2D93AB360DA876578B61E2AA4E99AAA9F9E2BD4B6F01B</code>
+            <button id="copy-sha-btn" class="btn-copy-sha" title="Copy Checksum">Copy</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hero Visual Art Card -->
+      <div class="hero-visual">
+        <div class="floating-brand-card">
+          <div class="card-inner">
+            <div class="badge-tag">OFFICIAL V1.0.1</div>
+            <img src="assets/dingo-card.png" alt="DINGO Neo-Brutalist Logo" class="brand-card-img">
+            <div class="card-bottom-info">
+              <div class="status-indicator">
+                <span class="status-green"></span>
+                <span>Direct P2P Online</span>
+              </div>
+              <span class="card-version">Windows x64</span>
+            </div>
+          </div>
+          <!-- Decorative Background Elements -->
+          <div class="card-shadow-backing"></div>
+          <div class="floating-badge badge-1">⚡ 0.4ms Latency</div>
+          <div class="floating-badge badge-2">🛡️ Zero Cloud Storage</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Interactive Live P2P Demo Simulator -->
+  <section class="section-container" id="interactive-demo">
+    <div class="section-header">
+      <div class="badge-pill">INTERACTIVE SIMULATION</div>
+      <h2 class="section-title">TEST THE P2P ENGINE IN ACTION</h2>
+      <p class="section-desc">Experience how Dingo sends direct packets without routing through cloud storage.</p>
+    </div>
+
+    <div class="demo-window brutalist-card">
+      <div class="window-bar">
+        <div class="window-dots">
+          <span class="dot red"></span>
+          <span class="dot yellow"></span>
+          <span class="dot green"></span>
+        </div>
+        <div class="window-title">DINGO P2P Channel Simulation • @alex_dev ↔ @sarah_design</div>
+        <div class="window-mode">LONG-DISTANCE MODE [ACTIVE]</div>
+      </div>
+
+      <div class="demo-chat-body" id="demo-chat-body">
+        <div class="demo-msg msg-peer">
+          <div class="demo-avatar">S</div>
+          <div class="demo-bubble">
+            <div class="demo-sender">@sarah_design</div>
+            Hey! Are we connected directly device-to-device?
+            <div class="demo-meta">0.3ms • WebRTC Direct DataChannel</div>
+          </div>
+        </div>
+
+        <div class="demo-msg msg-me">
+          <div class="demo-avatar me">A</div>
+          <div class="demo-bubble me">
+            <div class="demo-sender me">@alex_dev (You)</div>
+            Yes! Cloudflare only did the initial handshake. All messages stay on our machines! 🚀
+            <div class="demo-meta me">0.2ms • AES-256-GCM Encrypted</div>
+          </div>
+        </div>
+      </div>
+
+      <form id="demo-form" class="demo-input-bar">
+        <input type="text" id="demo-input" placeholder="Type a message to simulate instant P2P transfer…" autocomplete="off">
+        <button type="submit" class="brutalist-btn btn-primary demo-send-btn">
+          <span>Send P2P</span> →
+        </button>
+      </form>
+    </div>
+  </section>
+
+  <!-- How It Works / 3 Easy Steps -->
+  <section class="section-container" id="how-it-works">
+    <div class="section-header">
+      <div class="badge-pill">GETTING STARTED</div>
+      <h2 class="section-title">UP AND RUNNING IN 60 SECONDS</h2>
+      <p class="section-desc">No accounts. No phone numbers. No server configurations.</p>
+    </div>
+
+    <div class="steps-grid">
+      <div class="step-card brutalist-card">
+        <div class="step-num">01</div>
+        <h3 class="step-title">Run Setup.exe</h3>
+        <p class="step-text">
+          Download the lightweight 5.7 MB installer. Double-click to install on Windows 10/11 with zero prerequisites.
+        </p>
+        <div class="step-footer-tag">One-Click Install</div>
+      </div>
+
+      <div class="step-card brutalist-card">
+        <div class="step-num">02</div>
+        <h3 class="step-title">Pick Your Dingo ID</h3>
+        <p class="step-text">
+          Choose your unique <code>@handle</code>. No email, phone number, or password required. Your cryptographic keys generate locally.
+        </p>
+        <div class="step-footer-tag">Instant Identity</div>
+      </div>
+
+      <div class="step-card brutalist-card">
+        <div class="step-num">03</div>
+        <h3 class="step-title">Start Direct P2P Chat</h3>
+        <p class="step-text">
+          Toggle Long-Distance Mode, enter your friend's <code>@handle</code>, and start chatting. Local Wi-Fi discovery works out-of-the-box!
+        </p>
+        <div class="step-footer-tag">Pure Direct Connection</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features Section -->
+  <section class="section-container" id="features">
+    <div class="section-header">
+      <div class="badge-pill">ENGINEERED FOR PRIVACY</div>
+      <h2 class="section-title">WHY DINGO IS UNRIVALED</h2>
+      <p class="section-desc">Built from the ground up on modern cryptographic protocols and native Rust performance.</p>
+    </div>
+
+    <div class="features-grid">
+      <!-- Feature 1 -->
+      <div class="feature-card brutalist-card">
+        <div class="feature-icon-box bg-lime">🛡️</div>
+        <h3 class="feature-title">Strict Zero-Knowledge</h3>
+        <p class="feature-desc">
+          Cloudflare is only used for temporary peer signaling. It <strong>never</strong> sees, stores, or relays chat messages or files. Everything stays on your local hard drive.
+        </p>
+      </div>
+
+      <!-- Feature 2 -->
+      <div class="feature-card brutalist-card">
+        <div class="feature-icon-box bg-pink">🌐</div>
+        <h3 class="feature-title">Global Dingo ID Discovery</h3>
+        <p class="feature-desc">
+          Connect with peers across the globe using simple, friendly <code>@handles</code>. Ephemeral presence is managed through Cloudflare Durable Objects WebSocket hibernation.
+        </p>
+      </div>
+
+      <!-- Feature 3 -->
+      <div class="feature-card brutalist-card">
+        <div class="feature-icon-box bg-purple">⚡</div>
+        <h3 class="feature-title">WebRTC DataChannels</h3>
+        <p class="feature-desc">
+          High-throughput, direct peer-to-peer communication across NATs. Experience near-zero latency with direct hardware streaming between PCs.
+        </p>
+      </div>
+
+      <!-- Feature 4 -->
+      <div class="feature-card brutalist-card">
+        <div class="feature-icon-box bg-yellow">📶</div>
+        <h3 class="feature-title">Automatic LAN Discovery</h3>
+        <p class="feature-desc">
+          On the same Wi-Fi? DINGO instantly detects nearby devices via UDP broadcast without needing any internet connection whatsoever.
+        </p>
+      </div>
+
+      <!-- Feature 5 -->
+      <div class="feature-card brutalist-card">
+        <div class="feature-icon-box bg-cyan">📁</div>
+        <h3 class="feature-title">Gigabyte File Transfers</h3>
+        <p class="feature-desc">
+          No file size limits. Send raw 4K videos, zip files, and documents directly from disk to disk with chunked resume support.
+        </p>
+      </div>
+
+      <!-- Feature 6 -->
+      <div class="feature-card brutalist-card">
+        <div class="feature-icon-box bg-orange">📸</div>
+        <h3 class="feature-title">Native Screen Capture</h3>
+        <p class="feature-desc">
+          Snip and share full desktop screenshots or selected screen regions immediately using native Rust bindings.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Comparison Table -->
+  <section class="section-container" id="comparison">
+    <div class="section-header">
+      <div class="badge-pill">THE COMPARISON</div>
+      <h2 class="section-title">DINGO VS. CLOUD CHAT PLATFORMS</h2>
+      <p class="section-desc">See how direct desktop P2P compares to traditional corporate cloud messaging.</p>
+    </div>
+
+    <div class="table-responsive brutalist-card">
+      <table class="comparison-table">
+        <thead>
+          <tr>
+            <th>Architecture & Privacy Feature</th>
+            <th class="col-dingo">DINGO (v1.0.1)</th>
+            <th>Discord / Slack</th>
+            <th>WhatsApp / Telegram</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Central Cloud Message Storage</strong></td>
+            <td class="col-dingo check-badge">❌ ZERO (Local Only)</td>
+            <td class="cross-badge">✔️ Stored on Cloud DBs</td>
+            <td class="cross-badge">✔️ Stored in Cloud / Backup</td>
+          </tr>
+          <tr>
+            <td><strong>Peer-to-Peer DataChannels</strong></td>
+            <td class="col-dingo check-badge">✔️ Direct WebRTC P2P</td>
+            <td class="cross-badge">❌ Central WebSocket Gateway</td>
+            <td class="cross-badge">❌ Central Relays</td>
+          </tr>
+          <tr>
+            <td><strong>Account Requirements</strong></td>
+            <td class="col-dingo check-badge">❌ None (Local Keys)</td>
+            <td class="cross-badge">✔️ Email / Password / 2FA</td>
+            <td class="cross-badge">✔️ Mandatory Phone Number</td>
+          </tr>
+          <tr>
+            <td><strong>Works Offline on Local Wi-Fi</strong></td>
+            <td class="col-dingo check-badge">✔️ 100% Offline LAN</td>
+            <td class="cross-badge">❌ Requires Internet</td>
+            <td class="cross-badge">❌ Requires Internet</td>
+          </tr>
+          <tr>
+            <td><strong>File Size Limits</strong></td>
+            <td class="col-dingo check-badge">✔️ Unlimited (P2P Stream)</td>
+            <td class="cross-badge">❌ 10MB - 50MB Gate</td>
+            <td class="cross-badge">❌ 2GB File Capped</td>
+          </tr>
+          <tr>
+            <td><strong>Open Source & Auditable</strong></td>
+            <td class="col-dingo check-badge">✔️ MIT Open Source</td>
+            <td class="cross-badge">❌ Proprietary Closed Source</td>
+            <td class="cross-badge">❌ Proprietary Backend</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Final Download Banner -->
+  <section class="cta-banner-section">
+    <div class="cta-card brutalist-card">
+      <div class="cta-content">
+        <h2 class="cta-title">READY TO TAKE BACK YOUR PRIVACY?</h2>
+        <p class="cta-subtitle">
+          Download DINGO today. Free forever, completely open source, and built for true device-to-device freedom.
+        </p>
+        <div class="cta-actions">
+          <a href="https://github.com/Abhranil2004/DINGO---P2P-Desktop-Messaging-Application/releases/download/v1.0.1/Dingo_1.0.1_x64-setup.exe" class="brutalist-btn btn-primary btn-lg" download="Dingo_1.0.1_x64-setup.exe">
+            <span>Download Dingo Setup (.exe)</span> →
+          </a>
+          <a href="https://github.com/Abhranil2004/DINGO---P2P-Desktop-Messaging-Application" target="_blank" rel="noreferrer" class="brutalist-btn btn-secondary btn-lg">
+            <span>Star on GitHub ⭐</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-container">
+      <div class="footer-brand">
+        <img src="assets/dingo-banner.png" alt="DINGO" class="footer-logo">
+        <p class="footer-tagline">Next-Generation Zero-Knowledge P2P Desktop Messaging.</p>
+      </div>
+
+      <div class="footer-links-group">
+        <div class="footer-col">
+          <h4>Download</h4>
+          <a href="https://github.com/Abhranil2004/DINGO---P2P-Desktop-Messaging-Application/releases/download/v1.0.1/Dingo_1.0.1_x64-setup.exe">Windows Setup (.exe)</a>
+          <a href="https://github.com/Abhranil2004/DINGO---P2P-Desktop-Messaging-Application/releases/download/v1.0.1/Dingo.exe">Portable Executable</a>
+          <a href="https://github.com/Abhranil2004/DINGO---P2P-Desktop-Messaging-Application/releases">All Releases</a>
+        </div>
+
+        <div class="footer-col">
+          <h4>Technology</h4>
+          <a href="https://v2.tauri.app/" target="_blank" rel="noreferrer">Tauri v2</a>
+          <a href="https://www.rust-lang.org/" target="_blank" rel="noreferrer">Rust Core</a>
+          <a href="https://react.dev/" target="_blank" rel="noreferrer">React 19</a>
+          <a href="https://workers.cloudflare.com/" target="_blank" rel="noreferrer">Cloudflare Workers</a>
+        </div>
+
+        <div class="footer-col">
+          <h4>Community</h4>
+          <a href="https://github.com/Abhranil2004/DINGO---P2P-Desktop-Messaging-Application" target="_blank" rel="noreferrer">GitHub Repository</a>
+          <a href="https://github.com/Abhranil2004/DINGO---P2P-Desktop-Messaging-Application/issues" target="_blank" rel="noreferrer">Report an Issue</a>
+          <a href="https://github.com/Abhranil2004/DINGO---P2P-Desktop-Messaging-Application/blob/general/LICENSE" target="_blank" rel="noreferrer">MIT License</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <p>© 2026 DINGO Project. Crafted with ❤️ by <a href="https://github.com/Abhranil2004" target="_blank">Abhranil Dutta</a>. Released under the MIT License.</p>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

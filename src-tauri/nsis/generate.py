@@ -4,8 +4,8 @@ from PIL import Image, ImageDraw, ImageFont
 out_dir = r"c:\Users\abhra\Downloads\DINGO – P2P Desktop Messaging Application\DINGO – P2P Desktop Messaging Application\src-tauri\nsis"
 os.makedirs(out_dir, exist_ok=True)
 
-# Load the big card
-card = Image.open("master_icon_big.png").convert("RGBA")
+# Load the medium-big card
+card = Image.open("master_icon_medium_big.png").convert("RGBA")
 
 # 1. Generate Sidebar BMP (164 x 314)
 sidebar_w, sidebar_h = 164, 314
@@ -23,8 +23,8 @@ for y in range(0, sidebar_h, 16):
 draw.line([(sidebar_w - 2, 0), (sidebar_w - 2, sidebar_h)], fill=(112, 89, 226), width=2)
 draw.line([(sidebar_w - 4, 0), (sidebar_w - 4, sidebar_h)], fill=(198, 241, 53), width=2)
 
-# Make the card BIG on the sidebar: 154x154 px (takes nearly 100% of sidebar width!)
-card_side_w = 154
+# Make the card Medium-Big on the sidebar: 144x144 px
+card_side_w = 144
 card_side_h = int(card.height * (card_side_w / card.width))
 card_side = card.resize((card_side_w, card_side_h), Image.Resampling.LANCZOS)
 
