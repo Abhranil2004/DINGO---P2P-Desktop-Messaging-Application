@@ -122,6 +122,9 @@ export const getOnlinePeers = () => invoke("get_online_peers");
 export const restartDiscovery = (username, port) =>
   invoke("restart_discovery", { username, port });
 
+export const connectToPeerIp = (targetIp) =>
+  invoke("connect_to_peer_ip", { targetIp });
+
 // ================= SIGNALING =================
 export const startSignaling = (port = 45678) =>
   invoke("start_signaling", { port });

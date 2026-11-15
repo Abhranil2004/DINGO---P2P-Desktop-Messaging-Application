@@ -659,9 +659,13 @@ export default function SettingsPage() {
                                         </span>
                                     )}
                                 </div>
-                                {localUser?.dingo_id && (
-                                    <div style={{ fontSize: 13, color: 'var(--primary)', fontWeight: 600 }}>
+                                {localUser?.dingo_id ? (
+                                    <div style={{ fontSize: 13, color: 'var(--primary)', fontWeight: 700 }}>
                                         @{localUser.dingo_id}
+                                    </div>
+                                ) : (
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                                        No Dingo ID set (Click "Edit Profile" to claim your @handle)
                                     </div>
                                 )}
                                 <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>

@@ -86,6 +86,10 @@ export default function ChatPage() {
     const [showFindDingoModal, setShowFindDingoModal] = useState(false);
     const [dingoSearchInput, setDingoSearchInput] = useState('');
     const [isSearchingDingo, setIsSearchingDingo] = useState(false);
+    const [dingoSearchNotFound, setDingoSearchNotFound] = useState(null);
+    const [showDirectIpModal, setShowDirectIpModal] = useState(false);
+    const [directIpInput, setDirectIpInput] = useState('');
+    const [isPingingIp, setIsPingingIp] = useState(false);
     const [p2pState, setP2pState] = useState(p2pManager.getState());
     const [onlinePresenceSet, setOnlinePresenceSet] = useState(new Set());
 
@@ -136,6 +140,24 @@ export default function ChatPage() {
         setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
     }, []);
 
+    // Direct IP Connect helper
+    const handleDirectIpConnect = useCallback(async (ip) => {
+        const clean = (ip || directIpInput).trim().replace(/^https?:\/\//, '');
+        if (!clean) return;
+        setIsPingingIp(true);
+        try {
+            await api.connectToPeerIp(clean);
+            showToast(`Direct discovery ping sent to ${clean}! Linking up...`, 'success');
+            setShowDirectIpModal(false);
+            setDirectIpInput('');
+        } catch (err) {
+            console.error('Direct IP ping failed:', err);
+            showToast(`Failed to ping ${clean}: ${err?.message || err}`, 'error');
+        } finally {
+            setIsPingingIp(false);
+        }
+    }, [directIpInput, showToast]);
+
     // Search Dingo ID globally
     const handleSearchDingoId = useCallback(async (queryId) => {
         const handle = queryId.trim().replace(/^@/, '').toLowerCase();
@@ -151,6 +173,7 @@ export default function ChatPage() {
         }
 
         setIsSearchingDingo(true);
+        setDingoSearchNotFound(null);
 
         // 1. Search local user database — excluding yourself
         try {
@@ -179,7 +202,9 @@ export default function ChatPage() {
         const liveMatch = (peers || []).find(p =>
             p.device_id !== deviceId &&
             p.username?.toLowerCase() !== myUsername &&
-            (p.username?.toLowerCase() === handle || p.device_id?.toLowerCase() === handle)
+            ((p.dingo_id && p.dingo_id.toLowerCase() === handle) ||
+             p.username?.toLowerCase() === handle ||
+             p.device_id?.toLowerCase() === handle)
         );
         if (liveMatch) {
             chat.selectPeer(liveMatch);
@@ -224,21 +249,11 @@ export default function ChatPage() {
             console.warn('Global Dingo presence lookup failed:', e);
         }
 
-        // 4. Open conversation with @handle directly
-        const peerObj = {
-            id: `p2p_${handle}`,
-            device_id: `p2p_${handle}`,
-            username: handle,
-            dingo_id: handle,
-            isLongDistance: true,
-            isOnline: false,
-        };
-        chat.selectPeer(peerObj);
-        setShowFindDingoModal(false);
-        setDingoSearchInput('');
+        // 4. Handle not found — notify user clearly
         setIsSearchingDingo(false);
-        showToast(`Opened conversation with @${handle}`, 'success');
-    }, [chat.selectPeer, showToast, peers, localUser]);
+        setDingoSearchNotFound(handle);
+        showToast(`Dingo ID @${handle} is not available or offline.`, 'error');
+    }, [chat.selectPeer, showToast, peers, localUser, deviceId]);
 
     // Peer IP lookup
     const peerIpMap = useMemo(() => {
@@ -1263,14 +1278,20 @@ export default function ChatPage() {
         const userFromAll = allUsers.find(u => u.id === id);
         const resolvedName = (userFromAll && userFromAll.username) || (peerFromPeers && peerFromPeers.username) || activePeer.username || '';
         const resolvedAvatar = (userFromAll && userFromAll.avatar_path) || (peerFromPeers && peerFromPeers.avatar_path) || activePeer.avatar_path;
+        const resolvedDingoId = (userFromAll && userFromAll.dingo_id) || (peerFromPeers && peerFromPeers.dingo_id) || activePeer.dingo_id;
 
         // Only update if something actually changed
-        if ((resolvedName && resolvedName !== activePeer.username) || (resolvedAvatar && resolvedAvatar !== activePeer.avatar_path)) {
+        if (
+            (resolvedName && resolvedName !== activePeer.username) ||
+            (resolvedAvatar && resolvedAvatar !== activePeer.avatar_path) ||
+            (resolvedDingoId && resolvedDingoId !== activePeer.dingo_id)
+        ) {
             // Use updatePeerInfo (cosmetic update only — does NOT reload messages or re-subscribe listeners)
             chat.updatePeerInfo({
                 ...activePeer,
                 username: resolvedName,
                 avatar_path: resolvedAvatar,
+                dingo_id: resolvedDingoId,
             });
         }
     }, [activePeer?.device_id, peers, allUsers, chat.updatePeerInfo]); // Only re-run on actual peer list changes, not activePeer object changes
@@ -1278,19 +1299,27 @@ export default function ChatPage() {
     // Safe derived display values for header (fallbacks) — always use latest from peers/allUsers
     const displayActivePeerName = useMemo(() => {
         if (!activePeer) return '';
-        const id = activePeer.device_id;
+        const id = activePeer.device_id || activePeer.id;
         return peers.find(p => p.device_id === id)?.username
-            || allUsers.find(u => u.id === id)?.username
+            || allUsers.find(u => u.id === id || u.device_id === id)?.username
             || activePeer.username || 'Unknown';
-    }, [activePeer?.device_id, peers, allUsers]);
+    }, [activePeer, peers, allUsers]);
 
     const displayActivePeerAvatar = useMemo(() => {
         if (!activePeer) return undefined;
-        const id = activePeer.device_id;
+        const id = activePeer.device_id || activePeer.id;
         return peers.find(p => p.device_id === id)?.avatar_path
-            || allUsers.find(u => u.id === id)?.avatar_path
+            || allUsers.find(u => u.id === id || u.device_id === id)?.avatar_path
             || activePeer.avatar_path;
-    }, [activePeer?.device_id, peers, allUsers]);
+    }, [activePeer, peers, allUsers]);
+
+    const displayActivePeerDingoId = useMemo(() => {
+        if (!activePeer) return null;
+        const id = activePeer.device_id || activePeer.id;
+        return peers.find(p => p.device_id === id)?.dingo_id
+            || allUsers.find(u => u.id === id || u.device_id === id)?.dingo_id
+            || activePeer.dingo_id || null;
+    }, [activePeer, peers, allUsers]);
 
     const hasActiveChat = activePeer || activeGroup;
 
@@ -1307,10 +1336,18 @@ export default function ChatPage() {
                         <button
                             className="icon-btn"
                             title="Find user by Dingo ID (@handle)"
-                            onClick={() => setShowFindDingoModal(true)}
+                            onClick={() => { setDingoSearchNotFound(null); setShowFindDingoModal(true); }}
                             style={{ fontWeight: 900, fontSize: 13 }}
                         >
                             @
+                        </button>
+                        <button
+                            className="icon-btn"
+                            title="Direct Connect via LAN / Wi-Fi IP"
+                            onClick={() => setShowDirectIpModal(true)}
+                            style={{ fontSize: 13 }}
+                        >
+                            🔌
                         </button>
                         <button className="icon-btn" title="New Group" onClick={() => setShowNewGroup(true)}>
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1728,9 +1765,9 @@ export default function ChatPage() {
                             <div>
                                 <div className="chat-header-name" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                                     <span>{displayActivePeerName}</span>
-                                    {activePeer?.dingo_id ? (
+                                    {displayActivePeerDingoId ? (
                                         <span style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 700 }}>
-                                            @{activePeer.dingo_id}
+                                            @{displayActivePeerDingoId}
                                         </span>
                                     ) : (
                                         <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic', background: 'rgba(255,255,255,0.06)', padding: '2px 8px', borderRadius: 4 }}>
@@ -1766,9 +1803,9 @@ export default function ChatPage() {
                                 <div className="chat-empty-inner" style={{ background: 'var(--bg)', border: '2px solid var(--border)', borderRadius: 'var(--radius)', padding: '28px 24px' }}>
                                     <UserAvatar name={displayActivePeerName} size={60} avatarUrl={displayActivePeerAvatar} />
                                     <h3 style={{ marginTop: 12, marginBottom: 4 }}>{displayActivePeerName}</h3>
-                                    {activePeer?.dingo_id ? (
+                                    {displayActivePeerDingoId ? (
                                         <div style={{ color: 'var(--primary)', fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
-                                            @{activePeer.dingo_id}
+                                            @{displayActivePeerDingoId}
                                         </div>
                                     ) : (
                                         <div style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 12, marginBottom: 8 }}>
@@ -2208,20 +2245,112 @@ export default function ChatPage() {
                         </div>
                         <div className="profile-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                             <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>
-                                Connect with friends outside your local network. Enter their unique Dingo ID (Handle) to start chatting.
+                                Connect with friends by handle. If they are online or on your network, their profile will open immediately.
                             </p>
 
                             <form onSubmit={(e) => { e.preventDefault(); handleSearchDingoId(dingoSearchInput); }}>
-                                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: 16 }}>
+                                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: 12 }}>
                                     <span style={{ position: 'absolute', left: 12, fontWeight: 900, color: 'var(--primary)', fontSize: 16 }}>@</span>
                                     <input
                                         className="settings-input"
                                         placeholder="username (e.g. dev_abhra)"
                                         value={dingoSearchInput}
-                                        onChange={e => setDingoSearchInput(e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, ''))}
+                                        onChange={e => {
+                                            setDingoSearchInput(e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, ''));
+                                            if (dingoSearchNotFound) setDingoSearchNotFound(null);
+                                        }}
                                         autoFocus
                                         style={{
                                             width: '100%', padding: '10px 14px 10px 30px', borderRadius: 'var(--radius-sm)',
+                                            border: '2px solid var(--border)', background: 'var(--bg)',
+                                            color: 'var(--text)', fontSize: 14, fontWeight: 700
+                                        }}
+                                    />
+                                </div>
+
+                                {dingoSearchNotFound && (
+                                    <div style={{
+                                        background: 'rgba(239, 68, 68, 0.1)', border: '2px dashed var(--danger)',
+                                        borderRadius: 'var(--radius-sm)', padding: '12px 14px', marginBottom: 14
+                                    }}>
+                                        <div style={{ color: 'var(--danger)', fontWeight: 800, fontSize: 13, marginBottom: 4 }}>
+                                            ⚠️ Dingo ID @{dingoSearchNotFound} not found
+                                        </div>
+                                        <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.4, marginBottom: 10 }}>
+                                            No user with handle <strong>@{dingoSearchNotFound}</strong> is currently reachable. Make sure your friend has Dingo open with their handle set in Settings, or use Direct LAN / Wi-Fi IP to pair.
+                                        </div>
+                                        <button
+                                            type="button"
+                                            className="btn-secondary btn-sm"
+                                            style={{ width: '100%', fontWeight: 700 }}
+                                            onClick={() => {
+                                                const peerObj = {
+                                                    id: `p2p_${dingoSearchNotFound}`,
+                                                    device_id: `p2p_${dingoSearchNotFound}`,
+                                                    username: dingoSearchNotFound,
+                                                    dingo_id: dingoSearchNotFound,
+                                                    isLongDistance: true,
+                                                    isOnline: false,
+                                                };
+                                                chat.selectPeer(peerObj);
+                                                setShowFindDingoModal(false);
+                                                setDingoSearchInput('');
+                                                setDingoSearchNotFound(null);
+                                            }}
+                                        >
+                                            Still open conversation with @{dingoSearchNotFound} →
+                                        </button>
+                                    </div>
+                                )}
+
+                                <div className="modal-actions" style={{ margin: 0 }}>
+                                    <button
+                                        type="button"
+                                        className="btn-secondary"
+                                        onClick={() => { setShowFindDingoModal(false); setDingoSearchNotFound(null); }}
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        className="btn-primary"
+                                        disabled={!dingoSearchInput.trim() || isSearchingDingo}
+                                    >
+                                        {isSearchingDingo ? 'Searching…' : 'Find & Chat →'}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ─── Direct IP / LAN Connect Modal ──────────────────── */}
+            {showDirectIpModal && (
+                <div className="modal-overlay" onClick={() => setShowDirectIpModal(false)}>
+                    <div className="profile-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
+                        <div className="profile-modal-header">
+                            <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
+                                <span>🔌</span> Direct Connect (LAN / Wi-Fi IP)
+                            </h3>
+                            <button className="icon-btn" onClick={() => setShowDirectIpModal(false)}>✕</button>
+                        </div>
+                        <div className="profile-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                            <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>
+                                Connect directly to another PC on your local Wi-Fi, LAN, or VPN/Tailscale without relying on routers or broadcast. Enter their IP address:
+                            </p>
+
+                            <form onSubmit={(e) => { e.preventDefault(); handleDirectIpConnect(); }}>
+                                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: 16 }}>
+                                    <span style={{ position: 'absolute', left: 12, fontWeight: 800, color: 'var(--primary)', fontSize: 13 }}>IP</span>
+                                    <input
+                                        className="settings-input"
+                                        placeholder="e.g. 192.168.0.150 or 100.83.114.106"
+                                        value={directIpInput}
+                                        onChange={e => setDirectIpInput(e.target.value)}
+                                        autoFocus
+                                        style={{
+                                            width: '100%', padding: '10px 14px 10px 36px', borderRadius: 'var(--radius-sm)',
                                             border: '2px solid var(--border)', background: 'var(--bg)',
                                             color: 'var(--text)', fontSize: 14, fontWeight: 700
                                         }}
@@ -2232,16 +2361,16 @@ export default function ChatPage() {
                                     <button
                                         type="button"
                                         className="btn-secondary"
-                                        onClick={() => setShowFindDingoModal(false)}
+                                        onClick={() => setShowDirectIpModal(false)}
                                     >
                                         Cancel
                                     </button>
                                     <button
                                         type="submit"
                                         className="btn-primary"
-                                        disabled={!dingoSearchInput.trim() || isSearchingDingo}
+                                        disabled={!directIpInput.trim() || isPingingIp}
                                     >
-                                        {isSearchingDingo ? 'Searching…' : 'Find & Chat →'}
+                                        {isPingingIp ? 'Connecting…' : 'Direct Connect →'}
                                     </button>
                                 </div>
                             </form>

@@ -306,7 +306,11 @@ pub fn create_user(state: State<AppState>, input: CreateUserInput) -> Result<Use
                     }
                 }
             }
-            final_dingo_id = Some(new_dingo_id.clone());
+            final_dingo_id = if new_dingo_id.trim().is_empty() {
+                None
+            } else {
+                Some(new_dingo_id.trim().to_string())
+            };
             final_last_id_change = Some(now());
         }
     }
@@ -630,6 +634,12 @@ pub fn get_peers(state: State<AppState>) -> Vec<PeerInfo> {
 #[tauri::command]
 pub fn get_online_peers(state: State<AppState>) -> Vec<PeerInfo> {
     state.discovery.get_online_peers()
+}
+
+#[tauri::command]
+pub fn connect_to_peer_ip(state: State<AppState>, target_ip: String) -> Result<String, String> {
+    state.discovery.send_direct_ping(&target_ip)?;
+    Ok(format!("Sent direct discovery ping to {}", target_ip))
 }
 
 // ============ SIGNALING COMMANDS ============

@@ -74,6 +74,8 @@ pub struct DiscoveryManager {
     running: Arc<Mutex<bool>>,
     event_sender: Sender<DiscoveryEvent>,
     event_receiver: Receiver<DiscoveryEvent>,
+    socket: Arc<RwLock<Option<UdpSocket>>>,
+    local_info: Arc<RwLock<Option<PeerInfo>>>,
 }
 
 impl DiscoveryManager {
@@ -84,6 +86,8 @@ impl DiscoveryManager {
             running: Arc::new(Mutex::new(false)),
             event_sender: sender,
             event_receiver: receiver,
+            socket: Arc::new(RwLock::new(None)),
+            local_info: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -102,9 +106,9 @@ impl DiscoveryManager {
         // Create UDP socket
         let socket = create_multicast_socket(DISCOVERY_PORT).map_err(|e| e.to_string())?;
         let socket_send = socket.try_clone().map_err(|e| e.to_string())?;
+        let socket_reply = socket.try_clone().map_err(|e| e.to_string())?;
         
         // Prepare local peer info for announcement
-        // We set IP to 0.0.0.0 initially, receiver will fill it in
         let local_peer_info = PeerInfo {
             device_id: device_id.clone(),
             username: username.clone(),
@@ -115,12 +119,16 @@ impl DiscoveryManager {
             dingo_id: dingo_id.clone(),
         };
 
-        println!("Starting UDP discovery on port {}", DISCOVERY_PORT);
+        *self.socket.write().unwrap() = Some(socket_send.try_clone().unwrap_or_else(|_| socket.try_clone().unwrap()));
+        *self.local_info.write().unwrap() = Some(local_peer_info.clone());
+
+        println!("[Dingo Discovery] Starting UDP multi-interface discovery on port {}", DISCOVERY_PORT);
 
         // Spawn listener thread
         let peers_listen = peers.clone();
         let running_listen = running_clone.clone();
         let event_sender_listen = event_sender.clone();
+        let local_peer_reply = local_peer_info.clone();
         
         thread::spawn(move || {
             let mut buf = [0u8; 4096];
@@ -173,6 +181,15 @@ impl DiscoveryManager {
                                         DiscoveryEvent::PeerUpdated { peer: (&*peer).into() }
                                     };
                                     let _ = event_sender_listen.send(event);
+
+                                    // Direct unicast reply back to sender for instant bidirectional peering
+                                    let reply = DiscoveryPacket {
+                                        msg_type: MessageType::Hello,
+                                        peer: local_peer_reply.clone(),
+                                    };
+                                    if let Ok(reply_bytes) = serde_json::to_vec(&reply) {
+                                        let _ = socket_reply.send_to(&reply_bytes, src_addr);
+                                    }
                                 }
                                 MessageType::Bye => {
                                     let mut peers_lock = peers_listen.write().unwrap();
@@ -196,6 +213,7 @@ impl DiscoveryManager {
         // Spawn announcer thread
         thread::spawn(move || {
             let broadcast_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::BROADCAST), DISCOVERY_PORT);
+            let multicast_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(239, 255, 255, 250)), DISCOVERY_PORT);
             
             // Also try common subnet broadcast addresses for better LAN coverage
             let extra_broadcasts: Vec<SocketAddr> = get_local_broadcast_addresses()
@@ -203,7 +221,25 @@ impl DiscoveryManager {
                 .map(|ip| SocketAddr::new(IpAddr::V4(ip), DISCOVERY_PORT))
                 .collect();
 
-            println!("[Dingo Discovery] Announcer started. Broadcast targets: {:?} + {:?}", broadcast_addr, extra_broadcasts);
+            // Enumerate specific IPv4 NIC addresses for multi-homed / Windows Wi-Fi broadcast binding
+            let local_ips: Vec<Ipv4Addr> = if let Ok(interfaces) = network_interface::NetworkInterface::show() {
+                interfaces.into_iter().flat_map(|i| i.addr).filter_map(|a| {
+                    if let network_interface::Addr::V4(v4) = a {
+                        if !v4.ip.is_loopback() && v4.ip != Ipv4Addr::UNSPECIFIED {
+                            Some(v4.ip)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }).collect()
+            } else {
+                Vec::new()
+            };
+
+            println!("[Dingo Discovery] Announcer started. Targets: global={:?}, multicast={:?}, subnets={:?}, NICs={:?}",
+                broadcast_addr, multicast_addr, extra_broadcasts, local_ips);
             
             while *running_clone.lock().unwrap() {
                 let packet = DiscoveryPacket {
@@ -212,11 +248,24 @@ impl DiscoveryManager {
                 };
                 
                 if let Ok(data) = serde_json::to_vec(&packet) {
-                    // Send to global broadcast
+                    // Send to global broadcast and multicast via main socket
                     let _ = socket_send.send_to(&data, broadcast_addr);
-                    // Send to all subnet-specific broadcast addresses
+                    let _ = socket_send.send_to(&data, multicast_addr);
                     for addr in &extra_broadcasts {
                         let _ = socket_send.send_to(&data, addr);
+                    }
+
+                    // Windows multi-NIC fix: Bind temporary sender socket to each active interface IP
+                    // to force packets physically out through Wi-Fi, Ethernet, and virtual adapters
+                    for iface_ip in &local_ips {
+                        if let Ok(iface_sock) = UdpSocket::bind(SocketAddr::new(IpAddr::V4(*iface_ip), 0)) {
+                            let _ = iface_sock.set_broadcast(true);
+                            let _ = iface_sock.send_to(&data, broadcast_addr);
+                            let _ = iface_sock.send_to(&data, multicast_addr);
+                            for addr in &extra_broadcasts {
+                                let _ = iface_sock.send_to(&data, addr);
+                            }
+                        }
                     }
                 }
 
@@ -246,10 +295,35 @@ impl DiscoveryManager {
             };
             if let Ok(data) = serde_json::to_vec(&packet) {
                 let _ = socket_send.send_to(&data, broadcast_addr);
+                let _ = socket_send.send_to(&data, multicast_addr);
             }
         });
 
         Ok(true)
+    }
+
+    pub fn send_direct_ping(&self, target_ip: &str) -> Result<(), String> {
+        let socket_opt = self.socket.read().unwrap();
+        let socket = socket_opt.as_ref().ok_or("Discovery socket not initialized")?;
+        let info_opt = self.local_info.read().unwrap();
+        let info = info_opt.as_ref().ok_or("Local peer info not available")?;
+
+        let clean_ip = target_ip.trim().trim_start_matches("http://").trim_start_matches("https://");
+        let ip_only = clean_ip.split(':').next().unwrap_or(clean_ip);
+
+        let target_addr: SocketAddr = format!("{}:{}", ip_only, DISCOVERY_PORT)
+            .parse()
+            .map_err(|e| format!("Invalid target IP '{}': {}", ip_only, e))?;
+
+        let packet = DiscoveryPacket {
+            msg_type: MessageType::Hello,
+            peer: info.clone(),
+        };
+
+        let data = serde_json::to_vec(&packet).map_err(|e| e.to_string())?;
+        socket.send_to(&data, target_addr).map_err(|e| e.to_string())?;
+        println!("[Dingo Discovery] Direct unicast ping sent to {}", target_addr);
+        Ok(())
     }
 
     pub fn stop(&self) {
@@ -302,6 +376,22 @@ fn create_multicast_socket(port: u16) -> std::io::Result<UdpSocket> {
     
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
     socket.bind(&addr.into())?;
+
+    // Join local multicast group 239.255.255.250 on all local interfaces
+    let mcast_ip = Ipv4Addr::new(239, 255, 255, 250);
+    let _ = socket.join_multicast_v4(&mcast_ip, &Ipv4Addr::UNSPECIFIED);
+
+    if let Ok(interfaces) = network_interface::NetworkInterface::show() {
+        for iface in interfaces {
+            for addr in iface.addr {
+                if let network_interface::Addr::V4(v4) = addr {
+                    if !v4.ip.is_loopback() && v4.ip != Ipv4Addr::UNSPECIFIED {
+                        let _ = socket.join_multicast_v4(&mcast_ip, &v4.ip);
+                    }
+                }
+            }
+        }
+    }
     
     Ok(socket.into())
 }
@@ -405,8 +495,8 @@ mod tests {
         let pk1 = "pubkey1".to_string();
         let pk2 = "pubkey2".to_string();
         
-        dm1.start(id1.clone(), "User1".to_string(), 1234, pk1.clone()).unwrap();
-        dm2.start(id2.clone(), "User2".to_string(), 5678, pk2.clone()).unwrap();
+        dm1.start(id1.clone(), "User1".to_string(), 1234, pk1.clone(), None).unwrap();
+        dm2.start(id2.clone(), "User2".to_string(), 5678, pk2.clone(), None).unwrap();
         
         // Wait for discovery
         thread::sleep(Duration::from_secs(4));

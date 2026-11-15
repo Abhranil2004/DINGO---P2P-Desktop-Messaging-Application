@@ -87,6 +87,7 @@ export function useApp() {
                     type: 'ProfileUpdate', from: did, to: peerDeviceId,
                     username: lu.username || '', avatar_url: toSend,
                     bio: lu.bio || '', designation: lu.designation || '',
+                    dingo_id: lu.dingo_id || '',
                 });
                 // Also store it on our file server for compatibility with peers that prefer HTTP fetch.
                 // Fire-and-forget to avoid blocking the fast-path broadcast.
@@ -96,6 +97,7 @@ export function useApp() {
                 await api.sendSignalingMessage(peerDeviceId, {
                     type: 'ProfileUpdate', from: did, to: peerDeviceId,
                     username: lu.username || '', bio: lu.bio || '', designation: lu.designation || '',
+                    dingo_id: lu.dingo_id || '',
                 });
             }
         } catch (e) { /* peer might not be registered in signaling yet */ }
@@ -425,13 +427,14 @@ export function useApp() {
                 const exists = prev.find(u => u.id === peer.device_id);
                 if (exists) {
                     return prev.map(u => u.id === peer.device_id
-                        ? { ...u, username: peer.username, is_online: true }
+                        ? { ...u, username: peer.username, is_online: true, dingo_id: peer.dingo_id || u.dingo_id }
                         : u
                     );
                 }
                 return [...prev, {
                     id: peer.device_id, username: peer.username, device_id: peer.device_id,
                     is_online: true, public_key: peer.public_key,
+                    dingo_id: peer.dingo_id || undefined,
                     // If we already have a cached local avatar URL for this peer, use it immediately
                     avatar_path: avatarCache.getLocalAvatarUrl(peer.device_id) || undefined,
                 }];
@@ -510,6 +513,7 @@ export function useApp() {
                 public_key: peer.public_key || prev.public_key,
                 // prefer preserved avatar, then previously-known, then whatever presence supplied
                 avatar_path: preservedAvatar || prev.avatar_path || peer.avatar_path,
+                dingo_id: peer.dingo_id || prev.dingo_id || null,
                 // internal flag to indicate username was derived from presence and should be treated as sticky
                 _presenceUsernameLocked: presenceUsernameLocked,
             };
@@ -521,6 +525,7 @@ export function useApp() {
                 prev.avatar_path !== nextPeer.avatar_path ||
                 prev.public_key !== nextPeer.public_key ||
                 prev.username !== nextPeer.username ||
+                prev.dingo_id !== nextPeer.dingo_id ||
                 prev._presenceUsernameLocked !== nextPeer._presenceUsernameLocked;
 
             if (presenceChanged) {
@@ -539,6 +544,7 @@ export function useApp() {
                     ip_address: ip,
                     // CRITICAL: Don't overwrite avatar_path
                     avatar_path: preservedAvatar || u.avatar_path,
+                    dingo_id: peer.dingo_id || u.dingo_id || prev.dingo_id,
                 }
                 : u
             ));

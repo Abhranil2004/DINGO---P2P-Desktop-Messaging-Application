@@ -127,7 +127,8 @@ impl Database {
         let _ = conn.execute("ALTER TABLE users ADD COLUMN designation TEXT DEFAULT ''", []);
         let _ = conn.execute("ALTER TABLE users ADD COLUMN dingo_id TEXT", []);
         let _ = conn.execute("ALTER TABLE users ADD COLUMN last_id_change TEXT", []);
-        let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_dingo_id ON users(dingo_id)", []);
+        let _ = conn.execute("DROP INDEX IF EXISTS idx_users_dingo_id", []);
+        let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_dingo_id ON users(dingo_id) WHERE dingo_id IS NOT NULL AND dingo_id != ''", []);
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS messages (

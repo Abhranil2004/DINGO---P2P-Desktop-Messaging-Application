@@ -186,6 +186,8 @@ class P2PManager {
     try {
       const res = await fetch(`${serverUrl}/api/v1/presence/search?q=${encodeURIComponent(cleanQ)}`);
       if (!res.ok) return [];
+      const ct = res.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) return [];
       const data = await res.json();
       return data.results || [];
     } catch (e) {
@@ -200,6 +202,8 @@ class P2PManager {
     try {
       const res = await fetch(`${serverUrl}/api/v1/presence/lookup?dingoId=${encodeURIComponent(handle)}`);
       if (!res.ok) return { online: false };
+      const ct = res.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) return { online: false };
       return await res.json();
     } catch (e) {
       console.warn('[P2PManager] lookupPresence error:', e);
@@ -230,6 +234,13 @@ class P2PManager {
           toDingoId: handle,
         }),
       });
+
+      const ct = res.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) {
+        const errorMsg = `Signaling endpoint is unavailable. Use Direct IP or Invitation Code to connect.`;
+        this.setStatus('failed', errorMsg);
+        throw new Error(errorMsg);
+      }
 
       const data = await res.json();
       if (!res.ok || !data.ok) {

@@ -92,6 +92,7 @@ pub fn run() {
             commands::stop_discovery,
             commands::get_peers,
             commands::get_online_peers,
+            commands::connect_to_peer_ip,
             // Signaling commands
             commands::start_signaling,
             commands::register_peer,
